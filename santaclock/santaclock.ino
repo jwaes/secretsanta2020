@@ -1,9 +1,11 @@
 #include <FS.h>          // this needs to be first, or it all crashes and burns...
 #include <WiFiManager.h> // https://github.com/tzapu/WiFiManager
 #include <ArduinoJson.h> // https://github.com/bblanchon/ArduinoJson
+#include <DS3232RTC.h>   // https://github.com/JChristensen/DS3232RTC
 #include <FastLED.h>
 
 WiFiManager wm;
+DS3232RTC myRTC;
 
 //flag for saving data
 bool shouldSaveConfig = false;
@@ -32,6 +34,7 @@ int i = 0;
 
 void tick()
 {
+
     leds[DOT2] = CRGB::Blue;
     int brightness = 0;
     if (tick_on)
@@ -72,6 +75,14 @@ void setNumberOfLeds(int firstPosition, int number, CRGB crgb)
     }
 }
 
+void setLedSegment(int offset, CRGB crgb, String charArray, char n)
+{
+    if (charArray.indexOf(n) >= 0)
+        setNumberOfLeds(offset, 3, crgb);
+    else
+        setNumberOfLeds(offset, 3, CRGB(0, 0, 0));
+}
+
 void drawdigit(int offset, CRGB crgb, char n)
 {
     Serial.print("Going to draw a : ");
@@ -79,79 +90,87 @@ void drawdigit(int offset, CRGB crgb, char n)
     Serial.print(" on position ");
     Serial.println(offset);
 
-    String top =            "02356789x";
-    String top_right =      "01234789x";
-    String bottom_right =   "013456789o";
-    String bottom =         "0235689o";
-    String top_left =       "045689x";
-    String bottom_left =    "0268o";
-    String middle =         "2345689xo";
+    String top = "02356789x";
+    String top_right = "01234789x";
+    String bottom_right = "013456789o";
+    String bottom = "0235689o";
+    String top_left = "045689x";
+    String bottom_left = "0268o";
+    String middle = "2345689xo";
 
-    if (middle.indexOf(n) >= 0)
-    {
-        setNumberOfLeds(0 + offset, 3, crgb);
-    }
-    else
-    {
-        setNumberOfLeds(0 + offset, 3, CRGB(0, 0, 0));
-    }
+    setLedSegment(0 + offset, crgb, middle, n);
+    setLedSegment(3 + offset, crgb, bottom_right, n);
+    setLedSegment(6 + offset, crgb, bottom, n);
+    setLedSegment(9 + offset, crgb, bottom_left, n);
+    setLedSegment(12 + offset, crgb, top_left, n);
+    setLedSegment(15 + offset, crgb, top, n);
+    setLedSegment(18 + offset, crgb, top_right, n);
 
-    if (bottom_right.indexOf(n) >= 0)
-    {
-        setNumberOfLeds(3 + offset, 3, crgb);
-    }
-    else
-    {
-        setNumberOfLeds(3 + offset, 3, CRGB(0, 0, 0));
-    }
+    // if (middle.indexOf(n) >= 0)
+    // {
+    //     setNumberOfLeds(0 + offset, 3, crgb);
+    // }
+    // else
+    // {
+    //     setNumberOfLeds(0 + offset, 3, CRGB(0, 0, 0));
+    // }
 
-    if (bottom.indexOf(n) >= 0)
-    {
-        setNumberOfLeds(6 + offset, 3, crgb);
-    }
-    else
-    {
-        setNumberOfLeds(6 + offset, 3, CRGB(0, 0, 0));
-    }
+    // if (bottom_right.indexOf(n) >= 0)
+    // {
+    //     setNumberOfLeds(3 + offset, 3, crgb);
+    // }
+    // else
+    // {
+    //     setNumberOfLeds(3 + offset, 3, CRGB(0, 0, 0));
+    // }
 
-    if (bottom_left.indexOf(n) >= 0)
-    {
-        setNumberOfLeds(9 + offset, 3, crgb);
-    }
-    else
-    {
-        setNumberOfLeds(9 + offset, 3, CRGB(0, 0, 0));
-    }
+    // if (bottom.indexOf(n) >= 0)
+    // {
+    //     setNumberOfLeds(6 + offset, 3, crgb);
+    // }
+    // else
+    // {
+    //     setNumberOfLeds(6 + offset, 3, CRGB(0, 0, 0));
+    // }
 
-    if (top_left.indexOf(n) >= 0)
-    {
-        setNumberOfLeds(12 + offset, 3, crgb);
-    }
-    else
-    {
+    // if (bottom_left.indexOf(n) >= 0)
+    // {
+    //     setNumberOfLeds(9 + offset, 3, crgb);
+    // }
+    // else
+    // {
+    //     setNumberOfLeds(9 + offset, 3, CRGB(0, 0, 0));
+    // }
 
-        setNumberOfLeds(12 + offset, 3, CRGB(0, 0, 0));
-    }
+    // if (top_left.indexOf(n) >= 0)
+    // {
+    //     setNumberOfLeds(12 + offset, 3, crgb);
+    // }
+    // else
+    // {
 
-    if (top.indexOf(n) >= 0)
-    {
-        setNumberOfLeds(15 + offset, 3, crgb);
-    }
-    else
-    {
+    //     setNumberOfLeds(12 + offset, 3, CRGB(0, 0, 0));
+    // }
 
-        setNumberOfLeds(15 + offset, 3, CRGB(0, 0, 0));
-    }
+    // if (top.indexOf(n) >= 0)
+    // {
+    //     setNumberOfLeds(15 + offset, 3, crgb);
+    // }
+    // else
+    // {
 
-    if (top_right.indexOf(n) >= 0)
-    {
-        setNumberOfLeds(18 + offset, 3, crgb);
-    }
-    else
+    //     setNumberOfLeds(15 + offset, 3, CRGB(0, 0, 0));
+    // }
 
-    {
-        setNumberOfLeds(18 + offset, 3, CRGB(0, 0, 0));
-    }
+    // if (top_right.indexOf(n) >= 0)
+    // {
+    //     setNumberOfLeds(18 + offset, 3, crgb);
+    // }
+    // else
+
+    // {
+    //     setNumberOfLeds(18 + offset, 3, CRGB(0, 0, 0));
+    // }
 }
 
 void setup()
@@ -159,6 +178,8 @@ void setup()
     WiFi.mode(WIFI_STA); // explicitly set mode, esp defaults to STA+AP
 
     Serial.begin(9600);
+
+    myRTC.begin();
 
     FastLED.addLeds<LED_TYPE, DATA_PIN, COLOR_ORDER>(leds, NUM_LEDS).setCorrection(TypicalLEDStrip);
     Serial.println("FastLED setup");
@@ -204,12 +225,36 @@ void loop()
     //     i = 0;
     // }
 
-    CRGB crgb = CRGB::Green;
-    crgb = CRGB::Red;
-    drawdigit(DIGIT1, crgb, '1'); //Draw the first digit of the hour
-    drawdigit(DIGIT2, crgb, '2'); //Draw the second digit of the hour
-    drawdigit(DIGIT3, crgb, '3'); //Draw the first digit of the hour
-    drawdigit(DIGIT4, crgb, '4'); //Draw the second digit of the hour
+    // if(i > 9){
+    //     i = 0;
+    // }
+
+    // char c = '0' + i;
+
+    // i++;
+
+    // CRGB crgb = CRGB::Green;
+    // crgb = CRGB::Red;
+    // drawdigit(DIGIT1, crgb, c); //Draw the first digit of the hour
+    // drawdigit(DIGIT2, crgb, c); //Draw the second digit of the hour
+    // drawdigit(DIGIT3, crgb, c); //Draw the first digit of the hour
+    // drawdigit(DIGIT4, crgb, c); //Draw the second digit of the hour
+
+    time_t t = myRTC.get();
+    int hours = hour(t);
+    int mins = minute(t);
+
+    char h1 = '0' + hours / 10;
+    char h2 = '0' + hours - ((hours / 10) * 10);
+    char m1 = '0' + mins / 10;
+    char m2 = '0' + mins - ((mins / 10) * 10);
+
+    CRGB crgb = CRGB::Red;
+    drawdigit(DIGIT1, crgb, h1); //Draw the first digit of the hour
+    drawdigit(DIGIT2, crgb, h2); //Draw the second digit of the hour
+    drawdigit(DIGIT3, crgb, m1); //Draw the first digit of the hour
+    drawdigit(DIGIT4, crgb, m2); //Draw the second digit of the hour
+
     crgb = CRGB::Green;
     setNumberOfLeds(LOGO, DIGIT1, crgb);
     setNumberOfLeds(DOT1, 1, crgb);
@@ -217,5 +262,20 @@ void loop()
 
     FastLED.setBrightness(150);
     FastLED.show();
-    delay(200);
+
+    // char buf[40];
+    // time_t t = myRTC.get();
+    // float celsius = myRTC.temperature() / 4.0;
+    // float fahrenheit = celsius * 9.0 / 5.0 + 32.0;
+    // sprintf(buf, "%.2d:%.2d:%.2d %.2d%s%d ",
+    //         hour(t), minute(t), second(t), day(t), monthShortStr(month(t)), year(t));
+    // Serial.print(buf);
+    // Serial.print(celsius);
+    // Serial.print("C ");
+    // Serial.print(fahrenheit);
+    // Serial.println("F");
+    // Serial.print("hours ");
+    // Serial.println(hour(t));
+
+    delay(500);
 }
