@@ -31,6 +31,7 @@ bool tick_on = true;
 
 CRGB leds[NUM_LEDS];
 int i = 0;
+static uint8_t hue = 0;
 
 void tick()
 {
@@ -72,6 +73,7 @@ void setNumberOfLeds(int firstPosition, int number, CRGB crgb)
     for (int i = 0; i < number; i++)
     {
         leds[firstPosition + i] = crgb;
+        leds[firstPosition + i].nscale8(250);
     }
 }
 
@@ -106,71 +108,6 @@ void drawdigit(int offset, CRGB crgb, char n)
     setLedSegment(15 + offset, crgb, top, n);
     setLedSegment(18 + offset, crgb, top_right, n);
 
-    // if (middle.indexOf(n) >= 0)
-    // {
-    //     setNumberOfLeds(0 + offset, 3, crgb);
-    // }
-    // else
-    // {
-    //     setNumberOfLeds(0 + offset, 3, CRGB(0, 0, 0));
-    // }
-
-    // if (bottom_right.indexOf(n) >= 0)
-    // {
-    //     setNumberOfLeds(3 + offset, 3, crgb);
-    // }
-    // else
-    // {
-    //     setNumberOfLeds(3 + offset, 3, CRGB(0, 0, 0));
-    // }
-
-    // if (bottom.indexOf(n) >= 0)
-    // {
-    //     setNumberOfLeds(6 + offset, 3, crgb);
-    // }
-    // else
-    // {
-    //     setNumberOfLeds(6 + offset, 3, CRGB(0, 0, 0));
-    // }
-
-    // if (bottom_left.indexOf(n) >= 0)
-    // {
-    //     setNumberOfLeds(9 + offset, 3, crgb);
-    // }
-    // else
-    // {
-    //     setNumberOfLeds(9 + offset, 3, CRGB(0, 0, 0));
-    // }
-
-    // if (top_left.indexOf(n) >= 0)
-    // {
-    //     setNumberOfLeds(12 + offset, 3, crgb);
-    // }
-    // else
-    // {
-
-    //     setNumberOfLeds(12 + offset, 3, CRGB(0, 0, 0));
-    // }
-
-    // if (top.indexOf(n) >= 0)
-    // {
-    //     setNumberOfLeds(15 + offset, 3, crgb);
-    // }
-    // else
-    // {
-
-    //     setNumberOfLeds(15 + offset, 3, CRGB(0, 0, 0));
-    // }
-
-    // if (top_right.indexOf(n) >= 0)
-    // {
-    //     setNumberOfLeds(18 + offset, 3, crgb);
-    // }
-    // else
-
-    // {
-    //     setNumberOfLeds(18 + offset, 3, CRGB(0, 0, 0));
-    // }
 }
 
 void setup()
@@ -183,14 +120,11 @@ void setup()
 
     FastLED.addLeds<LED_TYPE, DATA_PIN, COLOR_ORDER>(leds, NUM_LEDS).setCorrection(TypicalLEDStrip);
     Serial.println("FastLED setup");
-
     FastLED.clear();
     FastLED.show();
 
-    // ticker.attach(0.6, tick);
-
     wm.resetSettings();
-    wm.setHostname("SecretSanctaClock");
+    wm.setHostname("SecretSantaClock");
 
     // wm.setAPCallback(configModeCallback);
     wm.setConfigPortalBlocking(false);
@@ -233,29 +167,26 @@ void loop()
 
     // i++;
 
-    // CRGB crgb = CRGB::Green;
-    // crgb = CRGB::Red;
-    // drawdigit(DIGIT1, crgb, c); //Draw the first digit of the hour
-    // drawdigit(DIGIT2, crgb, c); //Draw the second digit of the hour
-    // drawdigit(DIGIT3, crgb, c); //Draw the first digit of the hour
-    // drawdigit(DIGIT4, crgb, c); //Draw the second digit of the hour
-
     time_t t = myRTC.get();
     int hours = hour(t);
     int mins = minute(t);
+    int secs = second(t);
 
     char h1 = '0' + hours / 10;
     char h2 = '0' + hours - ((hours / 10) * 10);
     char m1 = '0' + mins / 10;
     char m2 = '0' + mins - ((mins / 10) * 10);
+    char s1 = '0' + secs / 10;
+    char s2 = '0' + secs - ((secs / 10) * 10);    
 
     CRGB crgb = CRGB::Red;
-    drawdigit(DIGIT1, crgb, h1); //Draw the first digit of the hour
-    drawdigit(DIGIT2, crgb, h2); //Draw the second digit of the hour
-    drawdigit(DIGIT3, crgb, m1); //Draw the first digit of the hour
-    drawdigit(DIGIT4, crgb, m2); //Draw the second digit of the hour
+    drawdigit(DIGIT1, crgb, h1);
+    drawdigit(DIGIT2, crgb, h2);
+    drawdigit(DIGIT3, crgb, s1);
+    drawdigit(DIGIT4, crgb, s2); 
 
-    crgb = CRGB::Green;
+    //crgb = CRGB::Green;
+    crgb = CHSV(hue++, 255, 255);
     setNumberOfLeds(LOGO, DIGIT1, crgb);
     setNumberOfLeds(DOT1, 1, crgb);
     setNumberOfLeds(DOT2, 1, crgb);
@@ -277,5 +208,5 @@ void loop()
     // Serial.print("hours ");
     // Serial.println(hour(t));
 
-    delay(500);
+    delay(100);
 }
