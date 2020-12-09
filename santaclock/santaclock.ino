@@ -2,26 +2,34 @@
 #include <WiFiManager.h> // https://github.com/tzapu/WiFiManager
 #include <ArduinoJson.h> // https://github.com/bblanchon/ArduinoJson
 #include <DS3232RTC.h>   // https://github.com/JChristensen/DS3232RTC
+#include <Timezone.h>    // https://github.com/JChristensen/Timezone
 #include <FastLED.h>
 #include <NTPClient.h>
+#include <TimeLib.h>
+#include <time.h>
 #include <WiFiUdp.h>
 
 WiFiManager wm;
+
 DS3232RTC myRTC;
 
 WiFiUDP ntpUDP;
-NTPClient timeClient(ntpUDP);
+int GTMOffset = 0; // SET TO UTC TIME
+NTPClient timeClient(ntpUDP, "europe.pool.ntp.org", GTMOffset * 60 * 60, 60 * 60 * 1000);
 
+TimeChangeRule CEST = {"CEST", Last, Sun, Mar, 2, 120}; // Central European Summer Time
+TimeChangeRule CET = {"CET ", Last, Sun, Oct, 3, 60};   // Central European Standard Time
+Timezone CE(CEST, CET);
+TimeChangeRule *tcr; //pointer to the time change rule, use to get TZ abbrev
 
 //flag for saving data
 bool shouldSaveConfig = false;
 
-//for LED status
-#include <Ticker.h>
-Ticker ticker;
-bool tick_on = true;
+// //for LED status
+// #include <Ticker.h>
+// Ticker ticker;
+// bool tick_on = true;
 
-#define NUM_LEDS 60
 #define DATA_PIN 2
 #define LED_TYPE WS2812B
 #define COLOR_ORDER GRB
@@ -39,22 +47,29 @@ CRGB leds[NUM_LEDS];
 int i = 0;
 static uint8_t hue = 0;
 
-void tick()
-{
+// void tick()
+// {
+//     leds[DOT2] = CRGB::Blue;
+//     int brightness = 0;
+//     if (tick_on)
+//     {
+//         brightness = 255;
+//     }
+//     else
+//     {
+//         brightness = 100;
+//     }
+//     tick_on = !tick_on;
+//     FastLED.setBrightness(brightness);
+//     FastLED.show();
+// }
 
-    leds[DOT2] = CRGB::Blue;
-    int brightness = 0;
-    if (tick_on)
-    {
-        brightness = 255;
-    }
-    else
-    {
-        brightness = 100;
-    }
-    tick_on = !tick_on;
-    FastLED.setBrightness(brightness);
-    FastLED.show();
+static tm getDateTimeByParams(long time)
+{
+    struct tm *newtime;
+    const time_t tim = time;
+    newtime = localtime(&tim);
+    return *newtime;
 }
 
 void configModeCallback(WiFiManager *myWiFiManager)
@@ -113,7 +128,6 @@ void drawdigit(int offset, CRGB crgb, char n)
     setLedSegment(12 + offset, crgb, top_left, n);
     setLedSegment(15 + offset, crgb, top, n);
     setLedSegment(18 + offset, crgb, top_right, n);
-
 }
 
 void setup()
@@ -123,10 +137,15 @@ void setup()
     Serial.begin(9600);
 
     myRTC.begin();
+    setSyncProvider(myRTC.get);
+    if (timeStatus() != timeSet)
+        Serial.println("Unable to sync with the RTC");
+    else
+        Serial.println("RTC has set the system time");
 
     FastLED.addLeds<LED_TYPE, DATA_PIN, COLOR_ORDER>(leds, NUM_LEDS).setCorrection(TypicalLEDStrip);
     Serial.println("FastLED setup");
-    FastLED.setBrightness(150);
+    FastLED.setBrightness(50);
     FastLED.clear();
     FastLED.show();
 
@@ -148,11 +167,22 @@ void setup()
     {
         //if you get here you have connected to the WiFi
         Serial.println("connected...yeey :)");
+
         timeClient.begin();
-        timeClient.update();
-        Serial.println("NTP time :");
-        Serial.println(timeClient.getFormattedTime());
-        myRTC.set(timeClient.getEpochTime());
+        delay(1000);
+        if (timeClient.update())
+        {
+            Serial.print("Adjust local clock");
+            unsigned long epoch = timeClient.getEpochTime();
+            setTime(epoch);
+        }
+        else
+        {
+            Serial.print("NTP Update does not WORK!!");
+        }
+
+        Serial.print(" now after ntp ? ");
+        Serial.println(now());
     }
 }
 
@@ -179,7 +209,13 @@ void loop()
 
     // i++;
 
-    time_t t = myRTC.get();
+    time_t utc = now();
+    // Serial.print("utc ");
+    // Serial.println(utc);
+    time_t t = CE.toLocal(utc, &tcr);
+    // Serial.print("local ");
+    // Serial.println(t);
+
     int hours = hour(t);
     int mins = minute(t);
     int secs = second(t);
@@ -189,13 +225,13 @@ void loop()
     char m1 = '0' + mins / 10;
     char m2 = '0' + mins - ((mins / 10) * 10);
     char s1 = '0' + secs / 10;
-    char s2 = '0' + secs - ((secs / 10) * 10);    
+    char s2 = '0' + secs - ((secs / 10) * 10);
 
     CRGB crgb = CRGB::Red;
     drawdigit(DIGIT1, crgb, h1);
     drawdigit(DIGIT2, crgb, h2);
     drawdigit(DIGIT3, crgb, m1);
-    drawdigit(DIGIT4, crgb, m2); 
+    drawdigit(DIGIT4, crgb, m2);
 
     //crgb = CRGB::Green;
     crgb = CHSV(hue++, 255, 255);
