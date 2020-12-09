@@ -3,9 +3,15 @@
 #include <ArduinoJson.h> // https://github.com/bblanchon/ArduinoJson
 #include <DS3232RTC.h>   // https://github.com/JChristensen/DS3232RTC
 #include <FastLED.h>
+#include <NTPClient.h>
+#include <WiFiUdp.h>
 
 WiFiManager wm;
 DS3232RTC myRTC;
+
+WiFiUDP ntpUDP;
+NTPClient timeClient(ntpUDP);
+
 
 //flag for saving data
 bool shouldSaveConfig = false;
@@ -87,10 +93,10 @@ void setLedSegment(int offset, CRGB crgb, String charArray, char n)
 
 void drawdigit(int offset, CRGB crgb, char n)
 {
-    Serial.print("Going to draw a : ");
-    Serial.print(n);
-    Serial.print(" on position ");
-    Serial.println(offset);
+    // Serial.print("Going to draw a : ");
+    // Serial.print(n);
+    // Serial.print(" on position ");
+    // Serial.println(offset);
 
     String top = "02356789x";
     String top_right = "01234789x";
@@ -120,10 +126,11 @@ void setup()
 
     FastLED.addLeds<LED_TYPE, DATA_PIN, COLOR_ORDER>(leds, NUM_LEDS).setCorrection(TypicalLEDStrip);
     Serial.println("FastLED setup");
+    FastLED.setBrightness(150);
     FastLED.clear();
     FastLED.show();
 
-    wm.resetSettings();
+    // wm.resetSettings();
     wm.setHostname("SecretSantaClock");
 
     // wm.setAPCallback(configModeCallback);
@@ -141,6 +148,11 @@ void setup()
     {
         //if you get here you have connected to the WiFi
         Serial.println("connected...yeey :)");
+        timeClient.begin();
+        timeClient.update();
+        Serial.println("NTP time :");
+        Serial.println(timeClient.getFormattedTime());
+        myRTC.set(timeClient.getEpochTime());
     }
 }
 
@@ -182,8 +194,8 @@ void loop()
     CRGB crgb = CRGB::Red;
     drawdigit(DIGIT1, crgb, h1);
     drawdigit(DIGIT2, crgb, h2);
-    drawdigit(DIGIT3, crgb, s1);
-    drawdigit(DIGIT4, crgb, s2); 
+    drawdigit(DIGIT3, crgb, m1);
+    drawdigit(DIGIT4, crgb, m2); 
 
     //crgb = CRGB::Green;
     crgb = CHSV(hue++, 255, 255);
