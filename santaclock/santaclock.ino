@@ -11,6 +11,7 @@
 
 WiFiManager wm;
 
+
 DS3232RTC myRTC;
 
 WiFiUDP ntpUDP;
@@ -47,23 +48,6 @@ CRGB leds[NUM_LEDS];
 int i = 0;
 static uint8_t hue = 0;
 
-// void tick()
-// {
-//     leds[DOT2] = CRGB::Blue;
-//     int brightness = 0;
-//     if (tick_on)
-//     {
-//         brightness = 255;
-//     }
-//     else
-//     {
-//         brightness = 100;
-//     }
-//     tick_on = !tick_on;
-//     FastLED.setBrightness(brightness);
-//     FastLED.show();
-// }
-
 static tm getDateTimeByParams(long time)
 {
     struct tm *newtime;
@@ -79,7 +63,6 @@ void configModeCallback(WiFiManager *myWiFiManager)
     //if you used auto generated SSID, print it
     Serial.println(myWiFiManager->getConfigPortalSSID());
     //entered config mode, make led toggle faster
-    ticker.attach(0.2, tick);
 }
 
 //callback notifying us of the need to save config
