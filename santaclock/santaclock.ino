@@ -8,9 +8,27 @@
 #include <TimeLib.h>
 #include <time.h>
 #include <WiFiUdp.h>
+#include <PubSubClient.h>
 
 WiFiManager wm;
+// WiFiManagerParameter custom_mqtt_server("server", "mqtt server", "servername", 40);
+// WiFiManagerParameter custom_mqtt_port("port", "mqtt port", "1234", 6);
 
+char mqtt_server[40] = "homeassistant";
+char mqtt_portStr[6] = "1883";
+char mqtt_username[32] = "hamqtt";
+char mqtt_password[32] = "a7iyLj0ktkniru3NgnXf";
+char mqtt_topic[32] = "secretsanta/clock";
+
+int mqtt_port = atoi(mqtt_portStr);
+String readStr;
+long chipid;
+bool online = false;
+
+const int BUFFER_SIZE = 300;
+
+WiFiClient espClient;
+PubSubClient mqttClient(espClient);
 
 DS3232RTC myRTC;
 
@@ -70,6 +88,94 @@ void saveConfigCallback()
 {
     Serial.println("Should save config");
     shouldSaveConfig = true;
+}
+
+void saveConfigJson()
+{
+    //save the custom parameters to FS
+    Serial.println("saving config");
+    //   DynamicJsonBuffer jsonBuffer;
+    //   JsonObject& json = jsonBuffer.createObject();
+    StaticJsonDocument<BUFFER_SIZE> json;
+    json["mqtt_server"] = mqtt_server;
+    json["mqtt_port"] = mqtt_portStr;
+    json["mqtt_username"] = mqtt_username;
+    json["mqtt_password"] = mqtt_password;
+    json["mqtt_topic"] = mqtt_topic;
+
+    File configFile = SPIFFS.open("/config.json", "w");
+    if (!configFile)
+    {
+        Serial.println("failed to open config file for writing");
+    }
+
+    //   json.printTo(Serial);
+    //   Serial.println();
+    //   json.printTo(configFile);
+
+    if (serializeJson(json, configFile) == 0)
+    {
+        Serial.println(F("Failed to write to file"));
+    }
+
+    configFile.close();
+    //end save
+}
+
+void reconnectMqtt()
+{
+
+    // Loop until we're reconnected
+    //   while (!mqttClient.connected()) {
+    Serial.print("Attempting MQTT connection to ");
+    Serial.print(mqtt_server);
+    Serial.println("...");
+    // Attempt to connect
+    char mqtt_clientid[15];
+    snprintf(mqtt_clientid, 14, "ESP%u", chipid);
+
+    if (mqttClient.connect(mqtt_clientid, mqtt_username, mqtt_password))
+    {
+        Serial.println("MQTT connected.");
+        long rssi = WiFi.RSSI();
+
+        //     char buf[50];
+        //     sprintf(buf, "ESP: %u Connected @ %i dBm", chipid, rssi);
+        //     char topic_buf[50];
+        //     sprintf(topic_buf, mqtt_topic, chipid);
+        //     mqttClient.publish(topic_buf, buf);
+
+        // send proper JSON startup message
+        StaticJsonDocument<BUFFER_SIZE> json;
+
+        //   DynamicJsonBuffer jsonBuffer;
+        //   JsonObject& json = jsonBuffer.createObject();
+        json["id"] = chipid;
+        json["rssi"] = rssi;
+        json["message"] = "Sensor startup";
+        //   char buf[110];
+        //   json.printTo(buf, sizeof(buf));
+
+        //   Serial.print("Publish message: ");
+        //   Serial.println(buf);
+
+        //   char topic_buf[50];
+        //   sprintf(topic_buf, mqtt_topic, chipid);
+        //   mqttClient.publish(topic_buf, buf);
+        char buffer[256];
+        size_t n = serializeJson(json, buffer);
+        mqttClient.publish("secretsanta/clocktest", buffer, n);
+    }
+
+    else
+    {
+        Serial.print("failed, rc=");
+        Serial.print(mqttClient.state());
+        Serial.println(" try again in 5 seconds");
+        // Wait 5 seconds before retrying
+        delay(5000);
+    }
+    //   }
 }
 
 void setNumberOfLeds(int firstPosition, int number, CRGB crgb)
@@ -132,16 +238,63 @@ void setup()
     FastLED.clear();
     FastLED.show();
 
-    // wm.resetSettings();
+      //clean FS, for testing
+      Serial.println("formatting FS ...");
+  SPIFFS.format();
+
+    //read configuration from FS json
+    Serial.println("mounting FS...");
+
+    if (SPIFFS.begin())
+    {
+        Serial.println("mounted file system");
+        if (SPIFFS.exists("/config.json"))
+        {
+            //file exists, reading and loading
+            Serial.println("reading config file");
+            File configFile = SPIFFS.open("/config.json", "r");
+            if (configFile)
+            {
+                Serial.println("opened config file");
+                size_t size = configFile.size();
+
+                StaticJsonDocument<BUFFER_SIZE> json;
+                // Deserialize the JSON document
+                DeserializationError error = deserializeJson(json, configFile);
+                if (error)
+                    Serial.println(F("Failed to read file, using default configuration"));
+
+                strcpy(mqtt_server, json["mqtt_server"]);
+                strcpy(mqtt_portStr, json["mqtt_port"]);
+                mqtt_port = atoi(mqtt_portStr);
+                strcpy(mqtt_username, json["mqtt_username"]);
+                strcpy(mqtt_password, json["mqtt_password"]);
+                strcpy(mqtt_topic, json["mqtt_topic"]);
+            }
+        }
+        else
+        {
+            Serial.println("/config.json does not exist, creating");
+            saveConfigJson(); // saving the hardcoded default values
+        }
+    }
+    else
+    {
+        Serial.println("failed to mount FS");
+    }
+    //end read
+
+    wm.setSaveConfigCallback(saveConfigCallback);
+
+    wm.resetSettings();
     wm.setHostname("SecretSantaClock");
 
     // wm.setAPCallback(configModeCallback);
     wm.setConfigPortalBlocking(false);
 
-    bool res;
-    res = wm.autoConnect("SecretSantaClockAP");
+    online = wm.autoConnect("SecretSantaClockAP");
 
-    if (!res)
+    if (!online)
     {
         Serial.println("Failed to connect");
         // ESP.restart();
@@ -167,12 +320,63 @@ void setup()
         Serial.print(" now after ntp ? ");
         Serial.println(now());
     }
+    // wm.startConfigPortal("SecretSantaClockAP");
+
+    //hardcoded ... should be a button
+    boolean startConfigPortal = true;
+
+    if (startConfigPortal)
+    {
+
+        Serial.println("setting parameters ");
+        
+        WiFiManagerParameter custom_mqtt_server("server", "mqtt server", mqtt_server, 40);
+        WiFiManagerParameter custom_mqtt_port("port", "mqtt port", mqtt_portStr, 6);
+        WiFiManagerParameter custom_mqtt_username("username", "mqtt username", mqtt_username, 32);
+        WiFiManagerParameter custom_mqtt_password("password", "mqtt password", mqtt_password, 32);
+        WiFiManagerParameter custom_mqtt_topic("topic", "mqtt topic", mqtt_topic, 32);
+
+        wm.addParameter(&custom_mqtt_server);
+        wm.addParameter(&custom_mqtt_port);
+        wm.addParameter(&custom_mqtt_username);
+        wm.addParameter(&custom_mqtt_password);
+        wm.addParameter(&custom_mqtt_topic);
+
+        // If the user requests it, start the wifimanager
+        wm.startConfigPortal("SecretSantaClockAP");
+
+        if (shouldSaveConfig)
+        {
+            // read the updated parameters
+            strcpy(mqtt_server, custom_mqtt_server.getValue());
+            strcpy(mqtt_portStr, custom_mqtt_port.getValue());
+            mqtt_port = atoi(mqtt_portStr);
+            strcpy(mqtt_username, custom_mqtt_username.getValue());
+            strcpy(mqtt_password, custom_mqtt_password.getValue());
+            strcpy(mqtt_topic, custom_mqtt_topic.getValue());
+
+            saveConfigJson();
+            shouldSaveConfig = false;
+        }
+    }
+
+    mqttClient.setServer(mqtt_server, mqtt_port);
 }
 
 void loop()
 {
     // because we are not blocking ...
     wm.process();
+
+    // if (online)
+    // {
+    //     // make sure the MQTT client is connected
+    //     if (!mqttClient.connected())
+    //     {
+    //         reconnectMqtt();
+    //     }
+    //     mqttClient.loop(); // Need to call this, otherwise mqtt breaks
+    // }
 
     // leds[i] = CRGB::Red;
     // Serial.println(i);
