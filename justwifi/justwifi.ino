@@ -30,6 +30,7 @@ char mqtt_password[parameterStdFieldLength] = "";
 char mqtt_topic_state[parameterStdFieldLength] = "secretsanta/clock";
 char mqtt_topic_set[parameterStdFieldLength] = "secretsanta/clock/set";
 char ntp_server[parameterStdFieldLength] = "europe.pool.ntp.org";
+char temp_offset[parameterShortFieldLength] = "-1.0";
 
 int mqtt_port_int = atoi(mqtt_port);
 
@@ -58,6 +59,7 @@ int GTMOffset = 0; // SET TO UTC TIME
 NTPClient timeClient(ntpUDP, ntp_server, GTMOffset * 60 * 60, 60 * 60 * 1000);
 Ticker ntpTicker;
 DS3232RTC myRTC;
+float celsius = 0.0;
 
 TimeChangeRule CEST = {"CEST", Last, Sun, Mar, 2, 120}; // Central European Summer Time
 TimeChangeRule CET = {"CET ", Last, Sun, Oct, 3, 60};   // Central European Standard Time
@@ -85,11 +87,15 @@ static uint8_t hue = 0;
 //modes
 const char *const MODE_OFF = "OFF";
 const char *const MODE_CLOCK = "CLOCK";
-const char *const MODE_STEP = "STEP";
 const char *const MODE_TEMP = "TEMP";
+const char *const MODE_CLOCKTEMP = "CLOCKTEMP";
 const char *const MODE_PCT = "PCT";
 
-const char* mode = MODE_CLOCK;
+const char *mode = MODE_CLOCKTEMP;
+
+const long MAXLONG = 2147483647;
+long tempCounterMin = 0;
+long tempCounterShow = MAXLONG;
 
 //this is only called when we are connected
 void saveConfigCallback()
@@ -193,9 +199,8 @@ void setupSpiffs()
                     strcpy(mqtt_topic_state, json["mqtt_topic_state"]);
                     custom_mqtt_topic_state.setValue(mqtt_topic_state, parameterStdFieldLength);
 
-
                     strcpy(mqtt_topic_set, json["mqtt_topic_set"]);
-                    custom_mqtt_topic_set.setValue(mqtt_topic_set, parameterStdFieldLength);                    
+                    custom_mqtt_topic_set.setValue(mqtt_topic_set, parameterStdFieldLength);
 
                     strcpy(ntp_server, json["ntp_server"]);
                     custom_ntp_server.setValue(ntp_server, parameterStdFieldLength);
@@ -234,9 +239,12 @@ void reconnectMqtt()
         Serial.println("MQTT connected.");
         Serial.print("MQTT subscribe to ");
         Serial.print(mqtt_topic_set);
-        if(mqttClient.subscribe(mqtt_topic_set)){
+        if (mqttClient.subscribe(mqtt_topic_set))
+        {
             Serial.println(" successfull");
-        } else {
+        }
+        else
+        {
             Serial.println(" failed");
         }
         postMqttStatus();
@@ -305,9 +313,9 @@ bool processJson(char *message)
         {
             mode = MODE_OFF;
         }
-        else if (strcmp(doc["mode"], MODE_STEP) == 0)
+        else if (strcmp(doc["mode"], MODE_CLOCKTEMP) == 0)
         {
-            mode = MODE_STEP;
+            mode = MODE_CLOCKTEMP;
         }
         else if (strcmp(doc["mode"], MODE_TEMP) == 0)
         {
@@ -373,13 +381,13 @@ void drawdigit(int offset, CRGB crgb, char n)
     // Serial.print(" on position ");
     // Serial.println(offset);
 
-    String top = "02356789x";
-    String top_right = "01234789x";
+    String top = "02356789x°";
+    String top_right = "01234789x°";
     String bottom_right = "013456789o";
     String bottom = "0235689o";
-    String top_left = "045689x";
+    String top_left = "045689x°";
     String bottom_left = "0268o";
-    String middle = "2345689xo";
+    String middle = "2345689xo°";
 
     setLedSegment(0 + offset, crgb, middle, n);
     setLedSegment(3 + offset, crgb, bottom_right, n);
@@ -423,6 +431,34 @@ void showTime()
     setNumberOfLeds(DOT2, 1, crgb);
 
     FastLED.setBrightness(150);
+}
+
+void showTemp()
+{
+    Serial.print("temp is ");
+    Serial.print(celsius);
+    Serial.println(" C");
+    
+    int c = celsius * 10;
+
+    char buffer[7];
+    itoa(c, buffer, 10);
+
+    char d1 = 0 + buffer[0];
+    char d2 = 0 + buffer[1];
+    char d3 = 0 + buffer[2];
+    char d4 = char(176);
+
+    CRGB crgb = CRGB::Orange;
+    drawdigit(DIGIT1, crgb, d1);
+    drawdigit(DIGIT2, crgb, d2);
+    drawdigit(DIGIT3, crgb, d3);
+    drawdigit(DIGIT4, crgb, d4);
+
+    //crgb = CRGB::Green;
+    crgb = CHSV(hue++, 255, 255);
+    setNumberOfLeds(LOGO, DIGIT1, crgb);
+    setNumberOfLeds(DOT2, 1, crgb);
 }
 
 void setup()
@@ -483,6 +519,7 @@ void setup()
         Serial.println("Unable to sync with the RTC");
     else
         Serial.println("RTC has set the system time");
+    celsius = myRTC.temperature() / 4.0;
 }
 
 void loop()
@@ -504,6 +541,34 @@ void loop()
     if (mode == MODE_CLOCK)
     {
         showTime();
+    }
+    else if (mode == MODE_TEMP)
+    {
+        celsius = myRTC.temperature() / 4.0;
+        showTemp();
+    }
+    else if (mode == MODE_CLOCKTEMP)
+    {
+        if (now() > tempCounterMin)
+        {
+            celsius = myRTC.temperature() / 4.0;
+            tempCounterMin = now() + 60;
+            tempCounterShow = now() + 5;
+            Serial.println("Resetting timer for temp");
+            Serial.print("tempCounterMin: ");
+            Serial.println(tempCounterMin);
+            Serial.print("tempCounterShow: ");
+            Serial.println(tempCounterShow);
+        }
+        if (now() < tempCounterShow)
+        {
+            Serial.println("showeing temp");
+            showTemp();
+        }
+        else
+        {
+            showTime();
+        }
     }
     else
     {
