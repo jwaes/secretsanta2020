@@ -15,7 +15,7 @@ char mqtt_server[40];
 char mqtt_port[6] = "8080";
 char api_token[32] = "YOUR_API_TOKEN";
 
-// WiFiManager, Local intialization. Once its business is done, there is no need to keep it around
+// WiFiManager, need it here as we want the clock to run in non-blocking mode without network connection too
 WiFiManager wm;
 
 // setup custom parameters
@@ -26,20 +26,13 @@ WiFiManager wm;
 WiFiManagerParameter custom_mqtt_server("server", "mqtt server", mqtt_server, 40);
 WiFiManagerParameter custom_mqtt_port("port", "mqtt port", mqtt_port, 6);
 WiFiManagerParameter custom_api_token("api", "api token", api_token, 32);
-
-//default custom static IP
-char static_ip[16] = "10.0.1.56";
-char static_gw[16] = "10.0.1.1";
-char static_sn[16] = "255.255.255.0";
-
-//flag for saving data
-bool shouldSaveConfig = false;
+WiFiManagerParameter custom_field; // global param ( for non blocking w params )
+int customFieldLength = 40;
 
 //callback notifying us of the need to save config
 void saveConfigCallback()
 {
     Serial.println("Should save config");
-    shouldSaveConfig = true;
 }
 
 void saveParamsCallback()
@@ -51,7 +44,7 @@ void saveParamsCallback()
 
     Serial.println("saving config");
 
-        //read updated parameters
+    //read updated parameters
     strcpy(mqtt_server, custom_mqtt_server.getValue());
     strcpy(mqtt_port, custom_mqtt_port.getValue());
     strcpy(api_token, custom_api_token.getValue());
@@ -109,9 +102,20 @@ void setupSpiffs()
                 {
                     Serial.println("\nparsed json");
 
+                    Serial.print(" token before read glob ");
+                    Serial.println(api_token);
+
                     strcpy(mqtt_server, json["mqtt_server"]);
+                    custom_mqtt_server.setValue(mqtt_server, 40);
                     strcpy(mqtt_port, json["mqtt_port"]);
+                    custom_mqtt_port.setValue(mqtt_port, 6);
                     strcpy(api_token, json["api_token"]);
+                    custom_api_token.setValue(api_token, 32);
+
+
+
+                    Serial.print(" token read glob ");
+                    Serial.println(api_token);
 
                     // if(json["ip"]) {
                     //   Serial.println("setting custom ip from config");
@@ -141,6 +145,9 @@ void setupSpiffs()
         Serial.println("failed to mount FS");
     }
     //end read
+
+    Serial.print(" token end read glob ");
+    Serial.println(api_token);
 }
 
 void setup()
@@ -155,10 +162,21 @@ void setup()
     wm.setSaveConfigCallback(saveConfigCallback);
     wm.setSaveParamsCallback(saveParamsCallback);
 
+    Serial.print(" token before adding params");
+    Serial.println(api_token);
     //add all your parameters here
     wm.addParameter(&custom_mqtt_server);
     wm.addParameter(&custom_mqtt_port);
     wm.addParameter(&custom_api_token);
+
+    Serial.print(" token after adding params ");
+    Serial.println(api_token);
+
+    Serial.print("wmparam after adding params ");
+    Serial.println(custom_api_token.getValue());
+
+    new (&custom_field) WiFiManagerParameter("customfieldid", "Custom Field Label", "Custom Field Value", customFieldLength, "placeholder=\"Custom Field Placeholder\" type=\"checkbox\""); // custom html type
+    wm.addParameter(&custom_field);
 
     // set static ip
     // IPAddress _ip,_gw,_sn;
@@ -199,35 +217,34 @@ void setup()
 
     //if you get here you have connected to the WiFi
 
+    // //save the custom parameters to FS
+    // if (shouldSaveConfig)
+    // {
+    //     Serial.println("saving config");
 
-    //save the custom parameters to FS
-    if (shouldSaveConfig)
-    {
-        Serial.println("saving config");
+    //     DynamicJsonDocument json(BUFFER_SIZE);
 
-        DynamicJsonDocument json(BUFFER_SIZE);
+    //     json["mqtt_server"] = mqtt_server;
+    //     json["mqtt_port"] = mqtt_port;
+    //     json["api_token"] = api_token;
 
-        json["mqtt_server"] = mqtt_server;
-        json["mqtt_port"] = mqtt_port;
-        json["api_token"] = api_token;
+    //     // json["ip"]          = WiFi.localIP().toString();
+    //     // json["gateway"]     = WiFi.gatewayIP().toString();
+    //     // json["subnet"]      = WiFi.subnetMask().toString();
 
-        // json["ip"]          = WiFi.localIP().toString();
-        // json["gateway"]     = WiFi.gatewayIP().toString();
-        // json["subnet"]      = WiFi.subnetMask().toString();
+    //     File configFile = SPIFFS.open("/config.json", "w");
+    //     if (!configFile)
+    //     {
+    //         Serial.println("failed to open config file for writing");
+    //     }
 
-        File configFile = SPIFFS.open("/config.json", "w");
-        if (!configFile)
-        {
-            Serial.println("failed to open config file for writing");
-        }
+    //     serializeJsonPretty(json, Serial);
+    //     serializeJson(json, configFile);
 
-        serializeJsonPretty(json, Serial);
-        serializeJson(json, configFile);
-
-        configFile.close();
-        //end save
-        shouldSaveConfig = false;
-    }
+    //     configFile.close();
+    //     //end save
+    //     shouldSaveConfig = false;
+    // }
 
     Serial.println("local ip");
     Serial.println(WiFi.localIP());
