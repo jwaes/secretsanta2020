@@ -2,12 +2,14 @@
 #include <WiFiManager.h> // https://github.com/tzapu/WiFiManager
 #include <ArduinoJson.h> // https://github.com/bblanchon/ArduinoJson
 #include <Timezone.h>    // https://github.com/JChristensen/Timezone
+#include <DS3232RTC.h>   // https://github.com/JChristensen/DS3232RTC
 #include <PubSubClient.h>
 #include <Ticker.h>
 #include <NTPClient.h>
 #include <TimeLib.h>
 #include <time.h>
 #include <WiFiUdp.h>
+#include <FastLED.h>
 
 #ifdef ESP32
 #include <SPIFFS.h>
@@ -53,11 +55,30 @@ WiFiUDP ntpUDP;
 int GTMOffset = 0; // SET TO UTC TIME
 NTPClient timeClient(ntpUDP, ntp_server, GTMOffset * 60 * 60, 60 * 60 * 1000);
 Ticker ntpTicker;
+DS3232RTC myRTC;
 
 TimeChangeRule CEST = {"CEST", Last, Sun, Mar, 2, 120}; // Central European Summer Time
 TimeChangeRule CET = {"CET ", Last, Sun, Oct, 3, 60};   // Central European Standard Time
 Timezone CE(CEST, CET);
 TimeChangeRule *tcr; //pointer to the time change rule, use to get TZ abbrev
+
+//LED stuff
+#define DATA_PIN 2
+#define LED_TYPE WS2812B
+#define COLOR_ORDER GRB
+#define NUM_LEDS 100
+
+#define LOGO 0
+#define DIGIT1 14
+#define DIGIT2 35
+#define DIGIT3 58
+#define DIGIT4 79
+#define DOT1 56
+#define DOT2 57
+
+CRGB leds[NUM_LEDS];
+int i = 0;
+static uint8_t hue = 0;
 
 //this is only called when we are connected
 void saveConfigCallback()
@@ -233,7 +254,7 @@ void updateTimeFromNTP()
     {
         Serial.print("Adjust local clock");
         unsigned long epoch = timeClient.getEpochTime();
-        setTime(epoch);
+        setTime(epoch);   
     }
     else
     {
@@ -242,6 +263,82 @@ void updateTimeFromNTP()
 
     Serial.print(" now after ntp ? ");
     Serial.println(now());
+}
+
+void setNumberOfLeds(int firstPosition, int number, CRGB crgb)
+{
+    for (int i = 0; i < number; i++)
+    {
+        leds[firstPosition + i] = crgb;
+        leds[firstPosition + i].nscale8(250);
+    }
+}
+
+void setLedSegment(int offset, CRGB crgb, String charArray, char n)
+{
+    if (charArray.indexOf(n) >= 0)
+        setNumberOfLeds(offset, 3, crgb);
+    else
+        setNumberOfLeds(offset, 3, CRGB(0, 0, 0));
+}
+
+void drawdigit(int offset, CRGB crgb, char n)
+{
+    // Serial.print("Going to draw a : ");
+    // Serial.print(n);
+    // Serial.print(" on position ");
+    // Serial.println(offset);
+
+    String top = "02356789x";
+    String top_right = "01234789x";
+    String bottom_right = "013456789o";
+    String bottom = "0235689o";
+    String top_left = "045689x";
+    String bottom_left = "0268o";
+    String middle = "2345689xo";
+
+    setLedSegment(0 + offset, crgb, middle, n);
+    setLedSegment(3 + offset, crgb, bottom_right, n);
+    setLedSegment(6 + offset, crgb, bottom, n);
+    setLedSegment(9 + offset, crgb, bottom_left, n);
+    setLedSegment(12 + offset, crgb, top_left, n);
+    setLedSegment(15 + offset, crgb, top, n);
+    setLedSegment(18 + offset, crgb, top_right, n);
+}
+
+void showTime(){
+    time_t utc = now();
+    // Serial.print("utc ");
+    // Serial.println(utc);
+    time_t t = CE.toLocal(utc, &tcr);
+    // Serial.print("local ");
+    // Serial.println(t);
+
+    int hours = hour(t);
+    int mins = minute(t);
+    int secs = second(t);
+
+    char h1 = '0' + hours / 10;
+    char h2 = '0' + hours - ((hours / 10) * 10);
+    char m1 = '0' + mins / 10;
+    char m2 = '0' + mins - ((mins / 10) * 10);
+    char s1 = '0' + secs / 10;
+    char s2 = '0' + secs - ((secs / 10) * 10);
+
+    CRGB crgb = CRGB::Red;
+    drawdigit(DIGIT1, crgb, h1);
+    drawdigit(DIGIT2, crgb, h2);
+    drawdigit(DIGIT3, crgb, m1);
+    drawdigit(DIGIT4, crgb, m2);
+
+    //crgb = CRGB::Green;
+    crgb = CHSV(hue++, 255, 255);
+    setNumberOfLeds(LOGO, DIGIT1, crgb);
+    setNumberOfLeds(DOT1, 1, crgb);
+    setNumberOfLeds(DOT2, 1, crgb);
+
+    FastLED.setBrightness(150);
+    FastLED.show();
 }
 
 void setup()
@@ -268,6 +365,7 @@ void setup()
 
     //reset settings - wipe credentials for testing
     // wm.resetSettings();
+    // ESP.reset();
 
     wm.setConfigPortalBlocking(false);
     wm.setHostname(HOSTNAME);
@@ -288,6 +386,20 @@ void setup()
     //every 5 minutes = 300
     mqttTicker.attach(300, postMqttStatus);
     ntpTicker.attach(600, updateTimeFromNTP);
+
+        FastLED.addLeds<LED_TYPE, DATA_PIN, COLOR_ORDER>(leds, NUM_LEDS).setCorrection(TypicalLEDStrip);
+    Serial.println("FastLED setup");
+    FastLED.setBrightness(50);
+    FastLED.clear();
+    FastLED.show();
+
+    myRTC.begin();
+    setSyncProvider(myRTC.get);
+    if (timeStatus() != timeSet)
+        Serial.println("Unable to sync with the RTC");
+    else
+        Serial.println("RTC has set the system time");    
+
 }
 
 void loop()
@@ -305,6 +417,8 @@ void loop()
         }
         mqttClient.loop(); // Need to call this, otherwise mqtt breaks
     }
+
+    showTime();
 
     delay(1000);
 }
