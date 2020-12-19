@@ -2,6 +2,7 @@
 #include <WiFiManager.h> // https://github.com/tzapu/WiFiManager
 #include <ArduinoJson.h> // https://github.com/bblanchon/ArduinoJson
 #include <PubSubClient.h>
+#include <Ticker.h>
 
 #ifdef ESP32
 #include <SPIFFS.h>
@@ -26,6 +27,8 @@ int mqtt_port_int = atoi(mqtt_port);
 
 // WiFiManager, need it here as we want the clock to run in non-blocking mode without network connection too
 WiFiManager wm;
+const char HOSTNAME[parameterStdFieldLength] = "SecretSantaClock";
+const char APNAME[parameterStdFieldLength] = "SecretSantaClockAP";
 
 WiFiManagerParameter custom_mqtt_server("server", "mqtt server", mqtt_server, parameterStdFieldLength);
 WiFiManagerParameter custom_mqtt_port("port", "mqtt port", mqtt_port, parameterShortFieldLength);
@@ -38,11 +41,13 @@ WiFiManagerParameter custom_field;
 
 WiFiClient espClient;
 PubSubClient mqttClient(espClient);
-long chipid;
+Ticker mqttTicker;
 
+//this is only called when we are connected
 void saveConfigCallback()
 {
     Serial.println("Should save config");
+    online = true;
 }
 
 void saveParamsCallback()
@@ -158,48 +163,34 @@ void setupSpiffs()
 void reconnectMqtt()
 {
     mqttClient.setServer(mqtt_server, mqtt_port_int);
-    // Loop until we're reconnected
-    //   while (!mqttClient.connected()) {
+
     Serial.print("Attempting MQTT connection to ");
     Serial.print(mqtt_server);
     Serial.println("...");
-    // Attempt to connect
-    char mqtt_clientid[15];
-    snprintf(mqtt_clientid, 14, "ESP%u", chipid);
-    Serial.print("mqtt connect with clientid: ");
-    Serial.println(mqtt_clientid);
 
-    if (mqttClient.connect(mqtt_clientid, mqtt_username, mqtt_password))
+    if (mqttClient.connect(HOSTNAME, mqtt_username, mqtt_password))
     {
         Serial.println("MQTT connected.");
+
+        postMqttStatus();
+    }
+}
+
+void postMqttStatus()
+{
+    if (mqttClient.connected())
+    {
+        Serial.println("posting Mqtt status");
         long rssi = WiFi.RSSI();
 
-        //     char buf[50];
-        //     sprintf(buf, "ESP: %u Connected @ %i dBm", chipid, rssi);
-        //     char topic_buf[50];
-        //     sprintf(topic_buf, mqtt_topic, chipid);
-        //     mqttClient.publish(topic_buf, buf);
-
-        // send proper JSON startup message
         StaticJsonDocument<BUFFER_SIZE> json;
-
-        //   DynamicJsonBuffer jsonBuffer;
-        //   JsonObject& json = jsonBuffer.createObject();
-        json["id"] = chipid;
+        json["test"] = "hmm";
         json["rssi"] = rssi;
-        json["message"] = "Sensor startup";
-        //   char buf[110];
-        //   json.printTo(buf, sizeof(buf));
-
-        //   Serial.print("Publish message: ");
-        //   Serial.println(buf);
-
-        //   char topic_buf[50];
-        //   sprintf(topic_buf, mqtt_topic, chipid);
-        //   mqttClient.publish(topic_buf, buf);
-        char buffer[256];
+        char buffer[BUFFER_SIZE];
         size_t n = serializeJson(json, buffer);
-        mqttClient.publish("secretsanta/clocktest", buffer, n);
+        mqttClient.publish(mqtt_topic, buffer, n);
+
+        serializeJsonPretty(json, Serial);
     }
 }
 
@@ -229,9 +220,9 @@ void setup()
     // wm.resetSettings();
 
     wm.setConfigPortalBlocking(false);
-    wm.setHostname("SecretSantaClock");
+    wm.setHostname(HOSTNAME);
 
-    online = wm.autoConnect("SecretSantaClockAP");
+    online = wm.autoConnect(APNAME);
 
     if (!online)
     {
@@ -243,10 +234,8 @@ void setup()
         Serial.println("connected...yeey :)");
     }
 
-    // Serial.println("local ip");
-    // Serial.println(WiFi.localIP());
-    // Serial.println(WiFi.gatewayIP());
-    // Serial.println(WiFi.subnetMask());
+    //every 5 minutes = 300
+    mqttTicker.attach(300, postMqttStatus);
 }
 
 void loop()
