@@ -22,6 +22,7 @@ boolean online = false;
 const int customFieldLength = 40;
 const int parameterStdFieldLength = 40;
 const int parameterShortFieldLength = 6;
+const int parameterColorFieldLength = 12;
 
 char mqtt_server[parameterStdFieldLength] = "homeassistant";
 char mqtt_port[parameterShortFieldLength] = "1883";
@@ -31,8 +32,11 @@ char mqtt_topic_state[parameterStdFieldLength] = "secretsanta/clock";
 char mqtt_topic_set[parameterStdFieldLength] = "secretsanta/clock/set";
 char ntp_server[parameterStdFieldLength] = "europe.pool.ntp.org";
 char temp_offset[parameterShortFieldLength] = "-1.0";
+char color1[parameterColorFieldLength] = "255,0,0";
+char color2[parameterColorFieldLength] = "0,255,0";
 
 int mqtt_port_int = atoi(mqtt_port);
+float temp_offset_float = atof(temp_offset);
 
 // WiFiManager, need it here as we want the clock to run in non-blocking mode without network connection too
 WiFiManager wm;
@@ -46,6 +50,10 @@ WiFiManagerParameter custom_mqtt_password("password", "mqtt password", mqtt_pass
 WiFiManagerParameter custom_mqtt_topic_state("topic_state", "mqtt topic", mqtt_topic_state, parameterStdFieldLength);
 WiFiManagerParameter custom_mqtt_topic_set("topic_set", "mqtt topic", mqtt_topic_set, parameterStdFieldLength);
 WiFiManagerParameter custom_ntp_server("ntp", "ntp server", ntp_server, parameterStdFieldLength);
+WiFiManagerParameter custom_temp_offset("offset", "temperature correction", temp_offset, parameterShortFieldLength);
+WiFiManagerParameter custom_color1("color1", "color 1", color1, parameterColorFieldLength);
+WiFiManagerParameter custom_color2("color2", "color 2", color2, parameterColorFieldLength);
+
 // WiFiManagerParameter custom_ntp_timezone("api", "timezone string", timezone_string, parameterStdFieldLength);
 WiFiManagerParameter custom_field;
 
@@ -83,6 +91,9 @@ TimeChangeRule *tcr; //pointer to the time change rule, use to get TZ abbrev
 CRGB leds[NUM_LEDS];
 int i = 0;
 static uint8_t hue = 0;
+
+CRGB c1;
+CRGB c2;
 
 //modes
 const char *const MODE_OFF = "OFF";
@@ -128,6 +139,10 @@ void saveParamsCallback()
     strcpy(mqtt_topic_state, custom_mqtt_topic_state.getValue());
     strcpy(mqtt_topic_set, custom_mqtt_topic_set.getValue());
     strcpy(ntp_server, custom_ntp_server.getValue());
+    strcpy(temp_offset, custom_temp_offset.getValue());
+    temp_offset_float = atof(temp_offset);
+    strcpy(color1, custom_color1.getValue());
+    strcpy(color2, custom_color2.getValue());
 
     DynamicJsonDocument json(BUFFER_SIZE);
 
@@ -138,6 +153,9 @@ void saveParamsCallback()
     json["mqtt_topic_state"] = mqtt_topic_state;
     json["mqtt_topic_set"] = mqtt_topic_set;
     json["ntp_server"] = ntp_server;
+    json["temp_offset"] = temp_offset;
+    json["color1"] = color1;
+    json["color2"] = color2;
 
     Serial.println("About to save ...");
     File configFile = SPIFFS.open("/config.json", "w");
@@ -152,6 +170,7 @@ void saveParamsCallback()
     configFile.close();
     Serial.println("File closed");
     //end save
+    setBaseColors();
 }
 
 void setupSpiffs()
@@ -204,6 +223,15 @@ void setupSpiffs()
 
                     strcpy(ntp_server, json["ntp_server"]);
                     custom_ntp_server.setValue(ntp_server, parameterStdFieldLength);
+
+                    strcpy(temp_offset, json["temp_offset"]);
+                    custom_temp_offset.setValue(temp_offset, parameterShortFieldLength);
+
+                    strcpy(color1, json["color1"]);
+                    custom_color1.setValue(color1, parameterColorFieldLength);
+
+                    strcpy(color2, json["color2"]);
+                    custom_color2.setValue(color2, parameterColorFieldLength);
                 }
                 else
                 {
@@ -418,7 +446,8 @@ void showTime()
     char s1 = '0' + secs / 10;
     char s2 = '0' + secs - ((secs / 10) * 10);
 
-    CRGB crgb = CRGB::Red;
+    // CRGB crgb = CRGB::Red;
+    CRGB crgb = c1;
     drawdigit(DIGIT1, crgb, h1);
     drawdigit(DIGIT2, crgb, h2);
     drawdigit(DIGIT3, crgb, m1);
@@ -438,8 +467,8 @@ void showTemp()
     Serial.print("temp is ");
     Serial.print(celsius);
     Serial.println(" C");
-    
-    int c = celsius * 10;
+
+    int c = (celsius + temp_offset_float) * 10;
 
     char buffer[7];
     itoa(c, buffer, 10);
@@ -449,7 +478,7 @@ void showTemp()
     char d3 = 0 + buffer[2];
     char d4 = char(176);
 
-    CRGB crgb = CRGB::Orange;
+    CRGB crgb = c2;
     drawdigit(DIGIT1, crgb, d1);
     drawdigit(DIGIT2, crgb, d2);
     drawdigit(DIGIT3, crgb, d3);
@@ -459,6 +488,52 @@ void showTemp()
     crgb = CHSV(hue++, 255, 255);
     setNumberOfLeds(LOGO, DIGIT1, crgb);
     setNumberOfLeds(DOT2, 1, crgb);
+    setNumberOfLeds(DOT1, 1, CRGB::Black);
+}
+
+CRGB getCRGBFromString(char *rgbStr)
+{
+    int rgb[3];
+    int i = 0;
+    char *p = rgbStr;
+    char *str;
+    while ((str = strtok_r(p, ",", &p)) != NULL)
+    {
+        rgb[i] = atoi(str);
+        // Serial.print(i);
+        // Serial.print(":");
+        // Serial.println((int) rgb[i]);
+
+        i++;
+    }
+
+    // int r = rgb[0];
+    // int g = rgb[1];
+    // int b = rgb[2];
+    // Serial.print("about to create crgb ");
+    // Serial.print(r);
+    // Serial.print(",");
+    // Serial.print(g);
+    // Serial.print(",");
+    // Serial.println(b);
+    CRGB output = CRGB(rgb[0], rgb[1], rgb[2]);
+    // Serial.print("infunc avg ");
+    // Serial.println(output.getAverageLight());
+    return output;
+}
+
+void setBaseColors()
+{
+    Serial.println("SETTING BASE COLORS");
+
+    // c1 = CRGB(0,100,0);
+    c1 = getCRGBFromString(color1);
+    Serial.print("c1 avg ");
+    Serial.println(c1.getAverageLight());
+    c2 = getCRGBFromString(color2);
+    // c2 = CRGB(0, 130, 240);
+    Serial.print("c2 avg ");
+    Serial.println(c1.getAverageLight());
 }
 
 void setup()
@@ -479,6 +554,9 @@ void setup()
     wm.addParameter(&custom_mqtt_password);
     wm.addParameter(&custom_mqtt_topic_state);
     wm.addParameter(&custom_ntp_server);
+    wm.addParameter(&custom_temp_offset);
+    wm.addParameter(&custom_color1);
+    wm.addParameter(&custom_color2);
 
     new (&custom_field) WiFiManagerParameter("customfieldid", "Custom Field Label", "Custom Field Value", customFieldLength, "placeholder=\"Custom Field Placeholder\" type=\"checkbox\""); // custom html type
     wm.addParameter(&custom_field);
@@ -512,6 +590,8 @@ void setup()
     FastLED.setBrightness(50);
     FastLED.clear();
     FastLED.show();
+
+    setBaseColors();
 
     myRTC.begin();
     setSyncProvider(myRTC.get);
@@ -554,15 +634,14 @@ void loop()
             celsius = myRTC.temperature() / 4.0;
             tempCounterMin = now() + 60;
             tempCounterShow = now() + 5;
-            Serial.println("Resetting timer for temp");
-            Serial.print("tempCounterMin: ");
-            Serial.println(tempCounterMin);
-            Serial.print("tempCounterShow: ");
-            Serial.println(tempCounterShow);
+            // Serial.println("Resetting timer for temp");
+            // Serial.print("tempCounterMin: ");
+            // Serial.println(tempCounterMin);
+            // Serial.print("tempCounterShow: ");
+            // Serial.println(tempCounterShow);
         }
         if (now() < tempCounterShow)
         {
-            Serial.println("showeing temp");
             showTemp();
         }
         else
@@ -576,7 +655,9 @@ void loop()
         FastLED.clear();
     }
 
+    Serial.println(c1);
+
     FastLED.show();
 
-    delay(1000);
+    delay(100);
 }
