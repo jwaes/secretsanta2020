@@ -1,8 +1,13 @@
 #include <FS.h>          // this needs to be first, or it all crashes and burns...
 #include <WiFiManager.h> // https://github.com/tzapu/WiFiManager
 #include <ArduinoJson.h> // https://github.com/bblanchon/ArduinoJson
+#include <Timezone.h>    // https://github.com/JChristensen/Timezone
 #include <PubSubClient.h>
 #include <Ticker.h>
+#include <NTPClient.h>
+#include <TimeLib.h>
+#include <time.h>
+#include <WiFiUdp.h>
 
 #ifdef ESP32
 #include <SPIFFS.h>
@@ -43,11 +48,28 @@ WiFiClient espClient;
 PubSubClient mqttClient(espClient);
 Ticker mqttTicker;
 
+//NTP stuff
+WiFiUDP ntpUDP;
+int GTMOffset = 0; // SET TO UTC TIME
+NTPClient timeClient(ntpUDP, ntp_server, GTMOffset * 60 * 60, 60 * 60 * 1000);
+Ticker ntpTicker;
+
+TimeChangeRule CEST = {"CEST", Last, Sun, Mar, 2, 120}; // Central European Summer Time
+TimeChangeRule CET = {"CET ", Last, Sun, Oct, 3, 60};   // Central European Standard Time
+Timezone CE(CEST, CET);
+TimeChangeRule *tcr; //pointer to the time change rule, use to get TZ abbrev
+
 //this is only called when we are connected
 void saveConfigCallback()
 {
     Serial.println("Should save config");
     online = true;
+
+    timeClient.setPoolServerName(ntp_server);
+
+    timeClient.begin();
+    delay(1000);
+    updateTimeFromNTP();
 }
 
 void saveParamsCallback()
@@ -194,6 +216,34 @@ void postMqttStatus()
     }
 }
 
+static tm getDateTimeByParams(long time)
+{
+    struct tm *newtime;
+    const time_t tim = time;
+    newtime = localtime(&tim);
+    return *newtime;
+}
+
+void updateTimeFromNTP()
+{
+    if (online)
+    {
+    }
+    if (timeClient.update())
+    {
+        Serial.print("Adjust local clock");
+        unsigned long epoch = timeClient.getEpochTime();
+        setTime(epoch);
+    }
+    else
+    {
+        Serial.print("NTP Update does not WORK!!");
+    }
+
+    Serial.print(" now after ntp ? ");
+    Serial.println(now());
+}
+
 void setup()
 {
     Serial.begin(9600);
@@ -232,17 +282,18 @@ void setup()
     else
     {
         Serial.println("connected...yeey :)");
+        updateTimeFromNTP();
     }
 
     //every 5 minutes = 300
     mqttTicker.attach(300, postMqttStatus);
+    ntpTicker.attach(600, updateTimeFromNTP);
 }
 
 void loop()
 {
     wm.process();
-    Serial.print("my username is ");
-    Serial.println(mqtt_username);
+    Serial.println(now());
 
     if (online)
     {
