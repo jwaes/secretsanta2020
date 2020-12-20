@@ -111,7 +111,7 @@ long tempCounterShow = MAXLONG;
 //this is only called when we are connected
 void saveConfigCallback()
 {
-    Serial.println("Should save config");
+    Serial.println(F("Should save config"));
     online = true;
 
     timeClient.setPoolServerName(ntp_server);
@@ -123,12 +123,12 @@ void saveConfigCallback()
 
 void saveParamsCallback()
 {
-    Serial.println("Get Params:");
+    Serial.println(F("Get Params:"));
     Serial.print(custom_mqtt_server.getID());
     Serial.print(" : ");
     Serial.println(custom_mqtt_server.getValue());
 
-    Serial.println("saving config");
+    Serial.println(F("saving config"));
 
     //read updated parameters
     strcpy(mqtt_server, custom_mqtt_server.getValue());
@@ -157,18 +157,18 @@ void saveParamsCallback()
     json["color1"] = color1;
     json["color2"] = color2;
 
-    Serial.println("About to save ...");
+    Serial.println(F("About to save ..."));
     File configFile = SPIFFS.open("/config.json", "w");
     if (!configFile)
     {
-        Serial.println("failed to open config file for writing");
+        Serial.println(F("failed to open config file for writing"));
     }
 
     serializeJsonPretty(json, Serial);
     serializeJson(json, configFile);
 
     configFile.close();
-    Serial.println("File closed");
+    Serial.println(F("File closed"));
     //end save
     setBaseColors();
 }
@@ -179,19 +179,19 @@ void setupSpiffs()
     //  SPIFFS.format();
 
     //read configuration from FS json
-    Serial.println("mounting FS...");
+    Serial.println(F("mounting FS..."));
 
     if (SPIFFS.begin())
     {
-        Serial.println("mounted file system");
+        Serial.println(F("mounted file system"));
         if (SPIFFS.exists("/config.json"))
         {
             //file exists, reading and loading
-            Serial.println("reading config file");
+            Serial.println(F("reading config file"));
             File configFile = SPIFFS.open("/config.json", "r");
             if (configFile)
             {
-                Serial.println("opened config file");
+                Serial.println(F("opened config file"));
                 size_t size = configFile.size();
 
                 DynamicJsonDocument json(BUFFER_SIZE);
@@ -200,7 +200,7 @@ void setupSpiffs()
                 serializeJson(json, Serial);
                 if (!error)
                 {
-                    Serial.println("\nparsed json");
+                    Serial.println(F("\nparsed json"));
 
                     strcpy(mqtt_server, json["mqtt_server"]);
                     custom_mqtt_server.setValue(mqtt_server, parameterStdFieldLength);
@@ -235,7 +235,7 @@ void setupSpiffs()
                 }
                 else
                 {
-                    Serial.println("failed to load json config");
+                    Serial.println(F("failed to load json config"));
                     Serial.print(F("deserializeJson() failed with code "));
                     Serial.println(error.c_str());
                 }
@@ -243,12 +243,12 @@ void setupSpiffs()
         }
         else
         {
-            Serial.println("no configfile found");
+            Serial.println(F("no configfile found"));
         }
     }
     else
     {
-        Serial.println("failed to mount FS");
+        Serial.println(F("failed to mount FS"));
     }
     //end read
 }
@@ -260,20 +260,20 @@ void reconnectMqtt()
 
     Serial.print("Attempting MQTT connection to ");
     Serial.print(mqtt_server);
-    Serial.println("...");
+    Serial.println(F("..."));
 
     if (mqttClient.connect(HOSTNAME, mqtt_username, mqtt_password))
     {
-        Serial.println("MQTT connected.");
-        Serial.print("MQTT subscribe to ");
+        Serial.println(F("MQTT connected."));
+        Serial.print(F("MQTT subscribe to "));
         Serial.print(mqtt_topic_set);
         if (mqttClient.subscribe(mqtt_topic_set))
         {
-            Serial.println(" successfull");
+            Serial.println(F(" successfull"));
         }
         else
         {
-            Serial.println(" failed");
+            Serial.println(F(" failed"));
         }
         postMqttStatus();
     }
@@ -283,7 +283,7 @@ void postMqttStatus()
 {
     if (mqttClient.connected())
     {
-        Serial.println("posting Mqtt status");
+        Serial.println(F("posting Mqtt status"));
         long rssi = WiFi.RSSI();
 
         StaticJsonDocument<BUFFER_SIZE> json;
@@ -299,9 +299,9 @@ void postMqttStatus()
 
 void mqttCallback(char *topic, byte *payload, unsigned int length)
 {
-    Serial.print("Message arrived [");
+    Serial.print(F("Message arrived ["));
     Serial.print(topic);
-    Serial.print("] ");
+    Serial.print(F("] "));
 
     char message[length + 1];
     for (int i = 0; i < length; i++)
@@ -381,7 +381,7 @@ void updateTimeFromNTP()
     }
     else
     {
-        Serial.print("NTP update failed");
+        Serial.print(F("NTP update failed"));
     }
 }
 
@@ -404,9 +404,9 @@ void setLedSegment(int offset, CRGB crgb, String charArray, char n)
 
 void drawdigit(int offset, CRGB crgb, char n)
 {
-    // Serial.print("Going to draw a : ");
+    // Serial.print(F("Going to draw a : "));
     // Serial.print(n);
-    // Serial.print(" on position ");
+    // Serial.print(F(" on position "));
     // Serial.println(offset);
 
     String top = "02356789x°";
@@ -429,11 +429,7 @@ void drawdigit(int offset, CRGB crgb, char n)
 void showTime()
 {
     time_t utc = now();
-    // Serial.print("utc ");
-    // Serial.println(utc);
     time_t t = CE.toLocal(utc, &tcr);
-    // Serial.print("local ");
-    // Serial.println(t);
 
     int hours = hour(t);
     int mins = minute(t);
@@ -446,14 +442,12 @@ void showTime()
     char s1 = '0' + secs / 10;
     char s2 = '0' + secs - ((secs / 10) * 10);
 
-    // CRGB crgb = CRGB::Red;
     CRGB crgb = c1;
     drawdigit(DIGIT1, crgb, h1);
     drawdigit(DIGIT2, crgb, h2);
     drawdigit(DIGIT3, crgb, m1);
     drawdigit(DIGIT4, crgb, m2);
 
-    //crgb = CRGB::Green;
     crgb = CHSV(hue++, 255, 255);
     setNumberOfLeds(LOGO, DIGIT1, crgb);
     setNumberOfLeds(DOT1, 1, crgb);
@@ -464,10 +458,6 @@ void showTime()
 
 void showTemp()
 {
-    Serial.print("temp is ");
-    Serial.print(celsius);
-    Serial.println(" C");
-
     int c = (celsius + temp_offset_float) * 10;
 
     char buffer[7];
@@ -484,7 +474,6 @@ void showTemp()
     drawdigit(DIGIT3, crgb, d3);
     drawdigit(DIGIT4, crgb, d4);
 
-    //crgb = CRGB::Green;
     crgb = CHSV(hue++, 255, 255);
     setNumberOfLeds(LOGO, DIGIT1, crgb);
     setNumberOfLeds(DOT2, 1, crgb);
@@ -501,7 +490,7 @@ CRGB getCRGBFromString(char *rgbStr)
     {
         rgb[i] = atoi(str);
         // Serial.print(i);
-        // Serial.print(":");
+        // Serial.print(F(":"));
         // Serial.println((int) rgb[i]);
 
         i++;
@@ -524,16 +513,8 @@ CRGB getCRGBFromString(char *rgbStr)
 
 void setBaseColors()
 {
-    Serial.println("SETTING BASE COLORS");
-
-    // c1 = CRGB(0,100,0);
     c1 = getCRGBFromString(color1);
-    Serial.print("c1 avg ");
-    Serial.println(c1.getAverageLight());
     c2 = getCRGBFromString(color2);
-    // c2 = CRGB(0, 130, 240);
-    Serial.print("c2 avg ");
-    Serial.println(c1.getAverageLight());
 }
 
 void setup()
@@ -572,12 +553,12 @@ void setup()
 
     if (!online)
     {
-        Serial.println("Failed to connect");
+        Serial.println(F("Failed to connect"));
         // ESP.restart();
     }
     else
     {
-        Serial.println("connected...yeey :)");
+        Serial.println(F("connected...yeey :)"));
         updateTimeFromNTP();
     }
 
@@ -586,7 +567,7 @@ void setup()
     ntpTicker.attach(600, updateTimeFromNTP);
 
     FastLED.addLeds<LED_TYPE, DATA_PIN, COLOR_ORDER>(leds, NUM_LEDS).setCorrection(TypicalLEDStrip);
-    Serial.println("FastLED setup");
+    Serial.println(F("FastLED setup"));
     FastLED.setBrightness(50);
     FastLED.clear();
     FastLED.show();
@@ -596,23 +577,22 @@ void setup()
     myRTC.begin();
     setSyncProvider(myRTC.get);
     if (timeStatus() != timeSet)
-        Serial.println("Unable to sync with the RTC");
+        Serial.println(F("Unable to sync with the RTC"));
     else
-        Serial.println("RTC has set the system time");
+        Serial.println(F("RTC has set the system time"));
     celsius = myRTC.temperature() / 4.0;
 }
 
 void loop()
 {
     wm.process();
-    Serial.println(now());
 
     if (online)
     {
         // make sure the MQTT client is connected
         if (!mqttClient.connected())
         {
-            Serial.println("reconnecting");
+            Serial.println(F("reconnecting"));
             reconnectMqtt();
         }
         mqttClient.loop(); // Need to call this, otherwise mqtt breaks
@@ -634,11 +614,11 @@ void loop()
             celsius = myRTC.temperature() / 4.0;
             tempCounterMin = now() + 60;
             tempCounterShow = now() + 5;
-            // Serial.println("Resetting timer for temp");
+            // Serial.println(F("Resetting timer for temp"));
             // Serial.print("tempCounterMin: ");
             // Serial.println(tempCounterMin);
             // Serial.print("tempCounterShow: ");
-            // Serial.println(tempCounterShow);
+            // Serial.println(tempCounterShow));
         }
         if (now() < tempCounterShow)
         {
@@ -655,9 +635,20 @@ void loop()
         FastLED.clear();
     }
 
-    Serial.println(c1);
+    if (now() % 100 == 0)
+    {
+        if (now() % 60 == 0)
+        {
+            Serial.println(F("."));
+        }
+        else
+        {
+            Serial.print(F("."));
+        }
+    }
 
     FastLED.show();
 
-    delay(100);
+
+    delay(1000);
 }
