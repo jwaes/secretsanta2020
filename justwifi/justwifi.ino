@@ -42,6 +42,7 @@ float temp_offset_float = atof(temp_offset);
 WiFiManager wm;
 const char HOSTNAME[parameterStdFieldLength] = "SecretSantaClock";
 const char APNAME[parameterStdFieldLength] = "SecretSantaClockAP";
+int timeout = 120;
 
 WiFiManagerParameter custom_mqtt_server("server", "mqtt server", mqtt_server, parameterStdFieldLength);
 WiFiManagerParameter custom_mqtt_port("port", "mqtt port", mqtt_port, parameterShortFieldLength);
@@ -60,6 +61,20 @@ WiFiManagerParameter custom_field;
 WiFiClient espClient;
 PubSubClient mqttClient(espClient);
 Ticker mqttTicker;
+
+//Push button
+#define TRIGGER_PIN D5
+int button = 0;
+boolean buttonPressed = false;
+int buttonLockUntil = 0;
+
+//LDR stuff
+#define LDRPIN A0
+float ldrValue;
+int LDR;
+float calcLDR;
+float diffLDR = 25;
+int bright = 100;
 
 //NTP stuff
 WiFiUDP ntpUDP;
@@ -517,10 +532,18 @@ void setBaseColors()
     c2 = getCRGBFromString(color2);
 }
 
+bool checkBoundSensor(float newValue, float prevValue, float maxDiff)
+{
+    return newValue < prevValue - maxDiff || newValue > prevValue + maxDiff;
+}
+
 void setup()
 {
     Serial.begin(9600);
     Serial.println();
+
+    pinMode(LDRPIN, INPUT);
+    pinMode(TRIGGER_PIN, INPUT_PULLUP);
 
     setupSpiffs();
 
@@ -647,8 +670,52 @@ void loop()
         }
     }
 
-    FastLED.show();
+    int newLDR = analogRead(LDRPIN);
+    if (checkBoundSensor(newLDR, LDR, diffLDR))
+    {
+        LDR = newLDR;
+        //      sendState();
+    }
+    // Serial.print(F("Lightsensor ; "));
+    // Serial.println(LDR);
+    bright = (1 - ((LDR - 100.) / 1024.)) * 150. - 15.;
+    Serial.print(F("proposed brightness "));
+    Serial.println(bright);
+    FastLED.setBrightness(bright);
 
+    button = digitalRead(TRIGGER_PIN);
+    Serial.print(F("Button: "));
+    Serial.println(button);
+
+    if (button == LOW)
+    {
+        if (buttonPressed == false)
+        {
+            buttonPressed = true;
+            // buttonLockUntil = now() + 10;
+            // Serial.println(F("Button pressed"));
+            // wm.setConfigPortalTimeout(timeout);
+            // wm.startConfigPortal(APNAME);
+            fill_solid(leds, NUM_LEDS, CRGB::White);
+            FastLED.show();
+            Serial.println(F("Resetting ... "));
+            SPIFFS.format();
+            wm.resetSettings();
+            ESP.reset();
+
+            // } else {
+            //     if(now() > buttonLockUntil){
+            //         Serial.println(F("Button press timed out"));
+            //         buttonPressed = false;
+            //     } else {
+            //         Serial.println(F("Button considered pressed"));
+            //         fill_solid(leds, NUM_LEDS, CRGB::White);
+            //     }
+            // }
+        }
+    }
+
+    FastLED.show();
 
     delay(1000);
 }
