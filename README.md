@@ -17,11 +17,11 @@ It works plug-and-play. Just attach the micro-usb cable to a 5V power supply and
 
 There is also a light sensor that adjusts the brightness of the clock to the ambiant light level. So during the day it will be brighter and in the evening when the room is darker, it will shine less bright.
 
-But that would be kinda boring, so ... i got it connected.
+But offline is kinda boring, so ... i got it connected.
 
 ## Configuration
 
-When plugged in, it starts an access-point named `SecretSantaAP`. It should send you to the configpage automatically as a captive portal. If you are not redirected you can browse to `http://192.168.4.1` manually.
+When plugged in, it starts an access-point named `SecretSantaAP`. Once you connect to it, you should be sent to the config-page automatically as a captive portal. If you are not redirected you can browse to `http://192.168.4.1` manually.
 
 ![Configuration](https://lh3.googleusercontent.com/pw/ACtC-3fxRZ9qJlxG3YoOpsDI95kS690p7wfzn1DI769k2gMZL0IllzKtDfk-TMJoJpl_HCifMcWCNolkzsp2s_H0nWb3tcXFJUJKLFxhQGRke-2RL0HxttUtZxFtF-XCdNrAAulKLNfGe6EFgQELGIl7BNxT=w931-h607-no?authuser=0)
 
@@ -63,7 +63,8 @@ To turn back on, send
 ## Just the start
 
 Of course this is just the start, that is why i am sharing the code. Consider it a startingpoint. The fundaments are there, now you can extend it as you wish.
-I have a beta version of this clock and it shows the indoor and outdoor temperature in different colors. It shows the progress of my 3D printer ... 
+I have a beta version of this clock and it shows the indoor and outdoor temperature in different colors. It shows the progress % of my 3D printer ... 
+I am not a C++ programmer so sorry for my bad coding, i noticed there is still some memoryleak in there, but hey, it kinda works :-)
 
 ## Credits
 
