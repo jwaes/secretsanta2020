@@ -1,9 +1,9 @@
 # secretsanta2020 :santa:
 
 This is a project for Rian who was on Santa's good-list.
-Santa got his name through the Secret Santa 2020 campaign of the MakeInBelgium facebrook group. () https://www.facebook.com/groups/makeinbelgium/permalink/3414757655276470 )
+Santa got his name through the Secret Santa 2020 campaign of the [MakeInBelgium facebrook group](https://www.facebook.com/groups/makeinbelgium/permalink/3414757655276470).
 
-This is a digital LED segment clock with a logo in modular 3D printed enclosures.
+I made him a digital LED segment clock with his name in modular 3D printed enclosures.
 
 ![SecretSantaClock](https://lh3.googleusercontent.com/pw/ACtC-3eVZhOMHTfICzi0teHSat15XgUNSiLqqCiNRee5lyfhbFXGZaFYJ4gO0QFXKAGCdoFwdbEP7DYLsP22yx-xGMuc261i1WjAGfB3t8Bz2P4to3SfvMSJvvKibINTjG5FJ4ud8s5aqXQ7LxhhNMFakMyr=w1080-h810-no?authuser=0)
 
@@ -22,6 +22,8 @@ But that would be kinda boring, so ... i got it connected.
 ## Configuration
 
 When plugged in, it starts an access-point named `SecretSantaAP`. It should send you to the configpage automatically as a captive portal. If you are not redirected you can browse to `http://192.168.4.1` manually.
+
+![Configuration](https://lh3.googleusercontent.com/pw/ACtC-3fxRZ9qJlxG3YoOpsDI95kS690p7wfzn1DI769k2gMZL0IllzKtDfk-TMJoJpl_HCifMcWCNolkzsp2s_H0nWb3tcXFJUJKLFxhQGRke-2RL0HxttUtZxFtF-XCdNrAAulKLNfGe6EFgQELGIl7BNxT=w931-h607-no?authuser=0)
 
 You can select your wifi accesspoint from the list and enter your password.
 
