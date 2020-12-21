@@ -58,9 +58,12 @@ WiFiManagerParameter custom_color2("color2", "color 2", color2, parameterColorFi
 // WiFiManagerParameter custom_ntp_timezone("api", "timezone string", timezone_string, parameterStdFieldLength);
 WiFiManagerParameter custom_field;
 
+//MQTT stuff
 WiFiClient espClient;
 PubSubClient mqttClient(espClient);
 Ticker mqttTicker;
+int mqttFailCounter = 0;
+long mqttIgnoreUntil = 0;
 
 //Push button
 #define TRIGGER_PIN D5
@@ -117,7 +120,7 @@ const char *const MODE_TEMP = "TEMP";
 const char *const MODE_CLOCKTEMP = "CLOCKTEMP";
 const char *const MODE_PCT = "PCT";
 
-const char *mode = MODE_CLOCKTEMP;
+const char *mode = MODE_CLOCK;
 
 const long MAXLONG = 2147483647;
 long tempCounterMin = 0;
@@ -131,7 +134,6 @@ void saveConfigCallback()
 
     timeClient.setPoolServerName(ntp_server);
 
-    timeClient.begin();
     delay(1000);
     updateTimeFromNTP();
 }
@@ -273,24 +275,40 @@ void reconnectMqtt()
     mqttClient.setServer(mqtt_server, mqtt_port_int);
     mqttClient.setCallback(mqttCallback);
 
-    Serial.print("Attempting MQTT connection to ");
-    Serial.print(mqtt_server);
-    Serial.println(F("..."));
-
-    if (mqttClient.connect(HOSTNAME, mqtt_username, mqtt_password))
+    if (mqttFailCounter < 5)
     {
-        Serial.println(F("MQTT connected."));
-        Serial.print(F("MQTT subscribe to "));
-        Serial.print(mqtt_topic_set);
-        if (mqttClient.subscribe(mqtt_topic_set))
+        Serial.print("Attempting MQTT connection to ");
+        Serial.print(mqtt_server);
+        Serial.println(F("..."));
+
+        if (mqttClient.connect(HOSTNAME, mqtt_username, mqtt_password))
         {
-            Serial.println(F(" successfull"));
+            Serial.println(F("MQTT connected."));
+            Serial.print(F("MQTT subscribe to "));
+            Serial.print(mqtt_topic_set);
+            if (mqttClient.subscribe(mqtt_topic_set))
+            {
+                Serial.println(F(" successfull"));
+            }
+            else
+            {
+                Serial.println(F(" failed"));
+            }
+            postMqttStatus();
         }
         else
         {
-            Serial.println(F(" failed"));
+            Serial.println(F("Connection to MQTT server failed"));
+            mqttFailCounter++;
+            mqttIgnoreUntil = now() + (10 * 60);
         }
-        postMqttStatus();
+    }
+    else
+    {
+        if (now() > mqttIgnoreUntil)
+        {
+            mqttFailCounter = 0;
+        }
     }
 }
 
@@ -368,6 +386,10 @@ bool processJson(char *message)
         {
             mode = MODE_PCT;
         }
+        else if (strcmp(doc["mode"], "NTP") == 0)
+        {
+            updateTimeFromNTP();
+        }
 
         FastLED.clear();
         FastLED.show();
@@ -390,9 +412,15 @@ void updateTimeFromNTP()
     }
     if (timeClient.update())
     {
-        Serial.print("Adjust local clock");
+        Serial.println(F("Adjust local clock"));
         unsigned long epoch = timeClient.getEpochTime();
+        Serial.print(F("NTP epoch time: "));
+        Serial.println(epoch);
         setTime(epoch);
+        Serial.println(F("Going to set RTC"));
+        myRTC.set(epoch);
+        Serial.print(F("Time on RTC is now: "));
+        Serial.println(myRTC.get());
     }
     else
     {
@@ -547,6 +575,18 @@ void setup()
 
     setupSpiffs();
 
+    timeClient.begin();
+    myRTC.begin();
+    setSyncProvider(myRTC.get);
+    if (timeStatus() != timeSet)
+        Serial.println(F("Unable to sync with the RTC"));
+    else
+    {
+        Serial.print(F("RTC has set the system time: "));
+        Serial.println(now());
+    }
+    celsius = myRTC.temperature() / 4.0;
+
     //callbacks
     wm.setSaveConfigCallback(saveConfigCallback);
     wm.setSaveParamsCallback(saveParamsCallback);
@@ -596,14 +636,6 @@ void setup()
     FastLED.show();
 
     setBaseColors();
-
-    myRTC.begin();
-    setSyncProvider(myRTC.get);
-    if (timeStatus() != timeSet)
-        Serial.println(F("Unable to sync with the RTC"));
-    else
-        Serial.println(F("RTC has set the system time"));
-    celsius = myRTC.temperature() / 4.0;
 }
 
 void loop()
@@ -615,7 +647,7 @@ void loop()
         // make sure the MQTT client is connected
         if (!mqttClient.connected())
         {
-            Serial.println(F("reconnecting"));
+            // Serial.println(F("reconnecting"));
             reconnectMqtt();
         }
         mqttClient.loop(); // Need to call this, otherwise mqtt breaks
@@ -637,11 +669,11 @@ void loop()
             celsius = myRTC.temperature() / 4.0;
             tempCounterMin = now() + 60;
             tempCounterShow = now() + 5;
-            // Serial.println(F("Resetting timer for temp"));
-            // Serial.print("tempCounterMin: ");
-            // Serial.println(tempCounterMin);
-            // Serial.print("tempCounterShow: ");
-            // Serial.println(tempCounterShow));
+            Serial.println(F("Resetting timer for temp"));
+            Serial.print(F("tempCounterMin: "));
+            Serial.println(tempCounterMin);
+            Serial.print(F("tempCounterShow: "));
+            Serial.println(tempCounterShow);
         }
         if (now() < tempCounterShow)
         {
@@ -679,13 +711,13 @@ void loop()
     // Serial.print(F("Lightsensor ; "));
     // Serial.println(LDR);
     bright = (1 - ((LDR - 100.) / 1024.)) * 150. - 15.;
-    Serial.print(F("proposed brightness "));
-    Serial.println(bright);
+    // Serial.print(F("proposed brightness "));
+    // Serial.println(bright);
     FastLED.setBrightness(bright);
 
     button = digitalRead(TRIGGER_PIN);
-    Serial.print(F("Button: "));
-    Serial.println(button);
+    // Serial.print(F("Button: "));
+    // Serial.println(button);
 
     if (button == LOW)
     {
@@ -699,9 +731,12 @@ void loop()
             fill_solid(leds, NUM_LEDS, CRGB::White);
             FastLED.show();
             Serial.println(F("Resetting ... "));
-            SPIFFS.format();
             wm.resetSettings();
+            Serial.println(F("Reset wm settings ... going to format"));
+            SPIFFS.format();
+            Serial.println(F("Format complet ... resetting ESP ..."));
             ESP.reset();
+            delay(1000);
 
             // } else {
             //     if(now() > buttonLockUntil){
