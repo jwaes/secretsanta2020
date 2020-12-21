@@ -602,8 +602,8 @@ void setup()
     wm.addParameter(&custom_color1);
     wm.addParameter(&custom_color2);
 
-    new (&custom_field) WiFiManagerParameter("customfieldid", "Custom Field Label", "Custom Field Value", customFieldLength, "placeholder=\"Custom Field Placeholder\" type=\"checkbox\""); // custom html type
-    wm.addParameter(&custom_field);
+    // new (&custom_field) WiFiManagerParameter("customfieldid", "Custom Field Label", "Custom Field Value", customFieldLength, "placeholder=\"Custom Field Placeholder\" type=\"checkbox\""); // custom html type
+    // wm.addParameter(&custom_field);
 
     //reset settings - wipe credentials for testing
     // wm.resetSettings();
@@ -708,11 +708,14 @@ void loop()
         LDR = newLDR;
         //      sendState();
     }
-    // Serial.print(F("Lightsensor ; "));
-    // Serial.println(LDR);
-    bright = (1 - ((LDR - 100.) / 1024.)) * 150.;
-    // Serial.print(F("proposed brightness "));
-    // Serial.println(bright);
+    Serial.print(F("Lightsensor ; "));
+    Serial.println(LDR);
+    // bright = (1 - ((LDR - 50.) / 1024.)) * 150.;
+    float minBrightness = 20.;
+    float maxBrightness = 150.;
+    bright = minBrightness + ((LDR / 1024.) * (maxBrightness - minBrightness));
+    Serial.print(F("proposed brightness "));
+    Serial.println(bright);
     FastLED.setBrightness(bright);
 
     button = digitalRead(TRIGGER_PIN);
