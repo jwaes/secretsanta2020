@@ -1,54 +1,98 @@
 #include <FS.h>          // this needs to be first, or it all crashes and burns...
 #include <WiFiManager.h> // https://github.com/tzapu/WiFiManager
 #include <ArduinoJson.h> // https://github.com/bblanchon/ArduinoJson
-#include <DS3232RTC.h>   // https://github.com/JChristensen/DS3232RTC
 #include <Timezone.h>    // https://github.com/JChristensen/Timezone
-#include <FastLED.h>
+#include <DS3232RTC.h>   // https://github.com/JChristensen/DS3232RTC
+#include <PubSubClient.h>
+#include <Ticker.h>
 #include <NTPClient.h>
 #include <TimeLib.h>
 #include <time.h>
 #include <WiFiUdp.h>
-#include <PubSubClient.h>
+#include <FastLED.h>
 
+#ifdef ESP32
+#include <SPIFFS.h>
+#endif
+
+const int BUFFER_SIZE = 1024;
+
+boolean online = false;
+
+const int customFieldLength = 40;
+const int parameterStdFieldLength = 40;
+const int parameterShortFieldLength = 6;
+const int parameterColorFieldLength = 12;
+
+char mqtt_server[parameterStdFieldLength] = "homeassistant";
+char mqtt_port[parameterShortFieldLength] = "1883";
+char mqtt_username[parameterStdFieldLength] = "";
+char mqtt_password[parameterStdFieldLength] = "";
+char mqtt_topic_state[parameterStdFieldLength] = "secretsanta/clock";
+char mqtt_topic_set[parameterStdFieldLength] = "secretsanta/clock/set";
+char ntp_server[parameterStdFieldLength] = "europe.pool.ntp.org";
+char temp_offset[parameterShortFieldLength] = "-1.0";
+char color1[parameterColorFieldLength] = "255,0,0";
+char color2[parameterColorFieldLength] = "0,255,0";
+
+int mqtt_port_int = atoi(mqtt_port);
+float temp_offset_float = atof(temp_offset);
+
+// WiFiManager, need it here as we want the clock to run in non-blocking mode without network connection too
 WiFiManager wm;
-// WiFiManagerParameter custom_mqtt_server("server", "mqtt server", "servername", 40);
-// WiFiManagerParameter custom_mqtt_port("port", "mqtt port", "1234", 6);
+const char HOSTNAME[parameterStdFieldLength] = "SecretSantaClock";
+const char APNAME[parameterStdFieldLength] = "SecretSantaClockAP";
+int timeout = 120;
 
-char mqtt_server[40] = "homeassistant";
-char mqtt_portStr[6] = "1883";
-char mqtt_username[32] = "hamqtt";
-char mqtt_password[32] = "a7iyLj0ktkniru3NgnXf";
-char mqtt_topic[32] = "secretsanta/clock";
+WiFiManagerParameter custom_mqtt_server("server", "mqtt server", mqtt_server, parameterStdFieldLength);
+WiFiManagerParameter custom_mqtt_port("port", "mqtt port", mqtt_port, parameterShortFieldLength);
+WiFiManagerParameter custom_mqtt_username("username", "mqtt username", mqtt_username, parameterStdFieldLength);
+WiFiManagerParameter custom_mqtt_password("password", "mqtt password", mqtt_password, parameterStdFieldLength);
+WiFiManagerParameter custom_mqtt_topic_state("topic_state", "mqtt topic", mqtt_topic_state, parameterStdFieldLength);
+WiFiManagerParameter custom_mqtt_topic_set("topic_set", "mqtt topic", mqtt_topic_set, parameterStdFieldLength);
+WiFiManagerParameter custom_ntp_server("ntp", "ntp server", ntp_server, parameterStdFieldLength);
+WiFiManagerParameter custom_temp_offset("offset", "temperature correction", temp_offset, parameterShortFieldLength);
+WiFiManagerParameter custom_color1("color1", "color 1", color1, parameterColorFieldLength);
+WiFiManagerParameter custom_color2("color2", "color 2", color2, parameterColorFieldLength);
 
-int mqtt_port = atoi(mqtt_portStr);
-String readStr;
-long chipid;
-bool online = false;
+// WiFiManagerParameter custom_ntp_timezone("api", "timezone string", timezone_string, parameterStdFieldLength);
+WiFiManagerParameter custom_field;
 
-const int BUFFER_SIZE = 300;
-
+//MQTT stuff
 WiFiClient espClient;
 PubSubClient mqttClient(espClient);
+Ticker mqttTicker;
+int mqttFailCounter = 0;
+long mqttIgnoreUntil = 0;
 
-DS3232RTC myRTC;
+//Push button
+#define TRIGGER_PIN D5
+int button = 0;
+boolean buttonPressed = false;
+int buttonLockUntil = 0;
 
+//LDR stuff
+#define LDRPIN A0
+float ldrValue;
+int LDR;
+float calcLDR;
+float diffLDR = 25;
+int bright = 100;
+
+//NTP stuff
 WiFiUDP ntpUDP;
 int GTMOffset = 0; // SET TO UTC TIME
-NTPClient timeClient(ntpUDP, "europe.pool.ntp.org", GTMOffset * 60 * 60, 60 * 60 * 1000);
+NTPClient timeClient(ntpUDP, ntp_server, GTMOffset * 60 * 60, 60 * 60 * 1000);
+Ticker ntpTicker;
+DS3232RTC myRTC;
+float celsius = 0.0;
 
 TimeChangeRule CEST = {"CEST", Last, Sun, Mar, 2, 120}; // Central European Summer Time
 TimeChangeRule CET = {"CET ", Last, Sun, Oct, 3, 60};   // Central European Standard Time
 Timezone CE(CEST, CET);
 TimeChangeRule *tcr; //pointer to the time change rule, use to get TZ abbrev
 
-//flag for saving data
-bool shouldSaveConfig = false;
-
-// //for LED status
-// #include <Ticker.h>
-// Ticker ticker;
-// bool tick_on = true;
-
+//LED stuff
 #define DATA_PIN 2
 #define LED_TYPE WS2812B
 #define COLOR_ORDER GRB
@@ -66,6 +110,293 @@ CRGB leds[NUM_LEDS];
 int i = 0;
 static uint8_t hue = 0;
 
+CRGB c1;
+CRGB c2;
+
+//modes
+const char *const MODE_OFF = "OFF";
+const char *const MODE_CLOCK = "CLOCK";
+const char *const MODE_TEMP = "TEMP";
+const char *const MODE_CLOCKTEMP = "CLOCKTEMP";
+const char *const MODE_PCT = "PCT";
+
+const char *mode = MODE_CLOCK;
+
+const long MAXLONG = 2147483647;
+long tempCounterMin = 0;
+long tempCounterShow = MAXLONG;
+
+//this is only called when we are connected
+void saveConfigCallback()
+{
+    Serial.println(F("Should save config"));
+    online = true;
+
+    timeClient.setPoolServerName(ntp_server);
+
+    delay(1000);
+    updateTimeFromNTP();
+}
+
+void saveParamsCallback()
+{
+    Serial.println(F("Get Params:"));
+    Serial.print(custom_mqtt_server.getID());
+    Serial.print(" : ");
+    Serial.println(custom_mqtt_server.getValue());
+
+    Serial.println(F("saving config"));
+
+    //read updated parameters
+    strcpy(mqtt_server, custom_mqtt_server.getValue());
+    strcpy(mqtt_port, custom_mqtt_port.getValue());
+    mqtt_port_int = atoi(mqtt_port);
+    strcpy(mqtt_username, custom_mqtt_username.getValue());
+    strcpy(mqtt_password, custom_mqtt_password.getValue());
+    strcpy(mqtt_topic_state, custom_mqtt_topic_state.getValue());
+    strcpy(mqtt_topic_set, custom_mqtt_topic_set.getValue());
+    strcpy(ntp_server, custom_ntp_server.getValue());
+    strcpy(temp_offset, custom_temp_offset.getValue());
+    temp_offset_float = atof(temp_offset);
+    strcpy(color1, custom_color1.getValue());
+    strcpy(color2, custom_color2.getValue());
+
+    DynamicJsonDocument json(BUFFER_SIZE);
+
+    json["mqtt_server"] = mqtt_server;
+    json["mqtt_port"] = mqtt_port;
+    json["mqtt_username"] = mqtt_username;
+    json["mqtt_password"] = mqtt_password;
+    json["mqtt_topic_state"] = mqtt_topic_state;
+    json["mqtt_topic_set"] = mqtt_topic_set;
+    json["ntp_server"] = ntp_server;
+    json["temp_offset"] = temp_offset;
+    json["color1"] = color1;
+    json["color2"] = color2;
+
+    Serial.println(F("About to save ..."));
+    File configFile = SPIFFS.open("/config.json", "w");
+    if (!configFile)
+    {
+        Serial.println(F("failed to open config file for writing"));
+    }
+
+    serializeJsonPretty(json, Serial);
+    serializeJson(json, configFile);
+
+    configFile.close();
+    Serial.println(F("File closed"));
+    //end save
+    setBaseColors();
+}
+
+void setupSpiffs()
+{
+    //clean FS, for testing
+    //  SPIFFS.format();
+
+    //read configuration from FS json
+    Serial.println(F("mounting FS..."));
+
+    if (SPIFFS.begin())
+    {
+        Serial.println(F("mounted file system"));
+        if (SPIFFS.exists("/config.json"))
+        {
+            //file exists, reading and loading
+            Serial.println(F("reading config file"));
+            File configFile = SPIFFS.open("/config.json", "r");
+            if (configFile)
+            {
+                Serial.println(F("opened config file"));
+                size_t size = configFile.size();
+
+                DynamicJsonDocument json(BUFFER_SIZE);
+                DeserializationError error = deserializeJson(json, configFile);
+
+                serializeJson(json, Serial);
+                if (!error)
+                {
+                    Serial.println(F("\nparsed json"));
+
+                    strcpy(mqtt_server, json["mqtt_server"]);
+                    custom_mqtt_server.setValue(mqtt_server, parameterStdFieldLength);
+
+                    strcpy(mqtt_port, json["mqtt_port"]);
+                    custom_mqtt_port.setValue(mqtt_port, parameterShortFieldLength);
+                    mqtt_port_int = atoi(mqtt_port);
+
+                    strcpy(mqtt_username, json["mqtt_username"]);
+                    custom_mqtt_username.setValue(mqtt_username, parameterStdFieldLength);
+
+                    strcpy(mqtt_password, json["mqtt_password"]);
+                    custom_mqtt_password.setValue(mqtt_password, parameterStdFieldLength);
+
+                    strcpy(mqtt_topic_state, json["mqtt_topic_state"]);
+                    custom_mqtt_topic_state.setValue(mqtt_topic_state, parameterStdFieldLength);
+
+                    strcpy(mqtt_topic_set, json["mqtt_topic_set"]);
+                    custom_mqtt_topic_set.setValue(mqtt_topic_set, parameterStdFieldLength);
+
+                    strcpy(ntp_server, json["ntp_server"]);
+                    custom_ntp_server.setValue(ntp_server, parameterStdFieldLength);
+
+                    strcpy(temp_offset, json["temp_offset"]);
+                    custom_temp_offset.setValue(temp_offset, parameterShortFieldLength);
+
+                    strcpy(color1, json["color1"]);
+                    custom_color1.setValue(color1, parameterColorFieldLength);
+
+                    strcpy(color2, json["color2"]);
+                    custom_color2.setValue(color2, parameterColorFieldLength);
+                }
+                else
+                {
+                    Serial.println(F("failed to load json config"));
+                    Serial.print(F("deserializeJson() failed with code "));
+                    Serial.println(error.c_str());
+                }
+            }
+        }
+        else
+        {
+            Serial.println(F("no configfile found"));
+        }
+    }
+    else
+    {
+        Serial.println(F("failed to mount FS"));
+    }
+    //end read
+}
+
+void reconnectMqtt()
+{
+    mqttClient.setServer(mqtt_server, mqtt_port_int);
+    mqttClient.setCallback(mqttCallback);
+
+    if (mqttFailCounter < 5)
+    {
+        Serial.print("Attempting MQTT connection to ");
+        Serial.print(mqtt_server);
+        Serial.println(F("..."));
+
+        if (mqttClient.connect(HOSTNAME, mqtt_username, mqtt_password))
+        {
+            Serial.println(F("MQTT connected."));
+            Serial.print(F("MQTT subscribe to "));
+            Serial.print(mqtt_topic_set);
+            if (mqttClient.subscribe(mqtt_topic_set))
+            {
+                Serial.println(F(" successfull"));
+            }
+            else
+            {
+                Serial.println(F(" failed"));
+            }
+            postMqttStatus();
+        }
+        else
+        {
+            Serial.println(F("Connection to MQTT server failed"));
+            mqttFailCounter++;
+            mqttIgnoreUntil = now() + (10 * 60);
+        }
+    }
+    else
+    {
+        if (now() > mqttIgnoreUntil)
+        {
+            mqttFailCounter = 0;
+        }
+    }
+}
+
+void postMqttStatus()
+{
+    if (mqttClient.connected())
+    {
+        Serial.println(F("posting Mqtt status"));
+        long rssi = WiFi.RSSI();
+
+        StaticJsonDocument<BUFFER_SIZE> json;
+        json["rssi"] = rssi;
+        json["mode"] = mode;
+        char buffer[BUFFER_SIZE];
+        size_t n = serializeJson(json, buffer);
+        mqttClient.publish(mqtt_topic_state, buffer, n);
+
+        serializeJsonPretty(json, Serial);
+    }
+}
+
+void mqttCallback(char *topic, byte *payload, unsigned int length)
+{
+    Serial.print(F("Message arrived ["));
+    Serial.print(topic);
+    Serial.print(F("] "));
+
+    char message[length + 1];
+    for (int i = 0; i < length; i++)
+    {
+        message[i] = (char)payload[i];
+    }
+    message[length] = '\0';
+    Serial.println(message);
+
+    if (!processJson(message))
+    {
+        return;
+    }
+
+    postMqttStatus();
+}
+
+bool processJson(char *message)
+{
+    StaticJsonDocument<BUFFER_SIZE> doc;
+
+    auto error = deserializeJson(doc, message);
+    if (error)
+    {
+        Serial.print(F("deserializeJson() failed with code "));
+        Serial.println(error.c_str());
+        return false;
+    }
+
+    if (doc.containsKey("mode"))
+    {
+        if (strcmp(doc["mode"], MODE_CLOCK) == 0)
+        {
+            mode = MODE_CLOCK;
+        }
+        else if (strcmp(doc["mode"], MODE_OFF) == 0)
+        {
+            mode = MODE_OFF;
+        }
+        else if (strcmp(doc["mode"], MODE_CLOCKTEMP) == 0)
+        {
+            mode = MODE_CLOCKTEMP;
+        }
+        else if (strcmp(doc["mode"], MODE_TEMP) == 0)
+        {
+            mode = MODE_TEMP;
+        }
+        else if (strcmp(doc["mode"], MODE_PCT) == 0)
+        {
+            mode = MODE_PCT;
+        }
+        else if (strcmp(doc["mode"], "NTP") == 0)
+        {
+            updateTimeFromNTP();
+        }
+
+        FastLED.clear();
+        FastLED.show();
+        return true;
+    }
+}
+
 static tm getDateTimeByParams(long time)
 {
     struct tm *newtime;
@@ -74,108 +405,27 @@ static tm getDateTimeByParams(long time)
     return *newtime;
 }
 
-void configModeCallback(WiFiManager *myWiFiManager)
+void updateTimeFromNTP()
 {
-    Serial.println("Entered config mode");
-    Serial.println(WiFi.softAPIP());
-    //if you used auto generated SSID, print it
-    Serial.println(myWiFiManager->getConfigPortalSSID());
-    //entered config mode, make led toggle faster
-}
-
-//callback notifying us of the need to save config
-void saveConfigCallback()
-{
-    Serial.println("Should save config");
-    shouldSaveConfig = true;
-}
-
-void saveConfigJson()
-{
-    //save the custom parameters to FS
-    Serial.println("saving config");
-    //   DynamicJsonBuffer jsonBuffer;
-    //   JsonObject& json = jsonBuffer.createObject();
-    StaticJsonDocument<BUFFER_SIZE> json;
-    json["mqtt_server"] = mqtt_server;
-    json["mqtt_port"] = mqtt_portStr;
-    json["mqtt_username"] = mqtt_username;
-    json["mqtt_password"] = mqtt_password;
-    json["mqtt_topic"] = mqtt_topic;
-
-    File configFile = SPIFFS.open("/config.json", "w");
-    if (!configFile)
+    if (online)
     {
-        Serial.println("failed to open config file for writing");
     }
-
-    //   json.printTo(Serial);
-    //   Serial.println();
-    //   json.printTo(configFile);
-
-    if (serializeJson(json, configFile) == 0)
+    if (timeClient.update())
     {
-        Serial.println(F("Failed to write to file"));
+        Serial.println(F("Adjust local clock"));
+        unsigned long epoch = timeClient.getEpochTime();
+        Serial.print(F("NTP epoch time: "));
+        Serial.println(epoch);
+        setTime(epoch);
+        Serial.println(F("Going to set RTC"));
+        myRTC.set(epoch);
+        Serial.print(F("Time on RTC is now: "));
+        Serial.println(myRTC.get());
     }
-
-    configFile.close();
-    //end save
-}
-
-void reconnectMqtt()
-{
-
-    // Loop until we're reconnected
-    //   while (!mqttClient.connected()) {
-    Serial.print("Attempting MQTT connection to ");
-    Serial.print(mqtt_server);
-    Serial.println("...");
-    // Attempt to connect
-    char mqtt_clientid[15];
-    snprintf(mqtt_clientid, 14, "ESP%u", chipid);
-
-    if (mqttClient.connect(mqtt_clientid, mqtt_username, mqtt_password))
-    {
-        Serial.println("MQTT connected.");
-        long rssi = WiFi.RSSI();
-
-        //     char buf[50];
-        //     sprintf(buf, "ESP: %u Connected @ %i dBm", chipid, rssi);
-        //     char topic_buf[50];
-        //     sprintf(topic_buf, mqtt_topic, chipid);
-        //     mqttClient.publish(topic_buf, buf);
-
-        // send proper JSON startup message
-        StaticJsonDocument<BUFFER_SIZE> json;
-
-        //   DynamicJsonBuffer jsonBuffer;
-        //   JsonObject& json = jsonBuffer.createObject();
-        json["id"] = chipid;
-        json["rssi"] = rssi;
-        json["message"] = "Sensor startup";
-        //   char buf[110];
-        //   json.printTo(buf, sizeof(buf));
-
-        //   Serial.print("Publish message: ");
-        //   Serial.println(buf);
-
-        //   char topic_buf[50];
-        //   sprintf(topic_buf, mqtt_topic, chipid);
-        //   mqttClient.publish(topic_buf, buf);
-        char buffer[256];
-        size_t n = serializeJson(json, buffer);
-        mqttClient.publish("secretsanta/clocktest", buffer, n);
-    }
-
     else
     {
-        Serial.print("failed, rc=");
-        Serial.print(mqttClient.state());
-        Serial.println(" try again in 5 seconds");
-        // Wait 5 seconds before retrying
-        delay(5000);
+        Serial.print(F("NTP update failed"));
     }
-    //   }
 }
 
 void setNumberOfLeds(int firstPosition, int number, CRGB crgb)
@@ -197,18 +447,18 @@ void setLedSegment(int offset, CRGB crgb, String charArray, char n)
 
 void drawdigit(int offset, CRGB crgb, char n)
 {
-    // Serial.print("Going to draw a : ");
+    // Serial.print(F("Going to draw a : "));
     // Serial.print(n);
-    // Serial.print(" on position ");
+    // Serial.print(F(" on position "));
     // Serial.println(offset);
 
-    String top = "02356789x";
-    String top_right = "01234789x";
+    String top = "02356789x°";
+    String top_right = "01234789x°";
     String bottom_right = "013456789o";
     String bottom = "0235689o";
-    String top_left = "045689x";
+    String top_left = "045689x°";
     String bottom_left = "0268o";
-    String middle = "2345689xo";
+    String middle = "2345689xo°";
 
     setLedSegment(0 + offset, crgb, middle, n);
     setLedSegment(3 + offset, crgb, bottom_right, n);
@@ -219,189 +469,10 @@ void drawdigit(int offset, CRGB crgb, char n)
     setLedSegment(18 + offset, crgb, top_right, n);
 }
 
-void setup()
+void showTime()
 {
-    WiFi.mode(WIFI_STA); // explicitly set mode, esp defaults to STA+AP
-
-    Serial.begin(9600);
-
-    myRTC.begin();
-    setSyncProvider(myRTC.get);
-    if (timeStatus() != timeSet)
-        Serial.println("Unable to sync with the RTC");
-    else
-        Serial.println("RTC has set the system time");
-
-    FastLED.addLeds<LED_TYPE, DATA_PIN, COLOR_ORDER>(leds, NUM_LEDS).setCorrection(TypicalLEDStrip);
-    Serial.println("FastLED setup");
-    FastLED.setBrightness(50);
-    FastLED.clear();
-    FastLED.show();
-
-      //clean FS, for testing
-      Serial.println("formatting FS ...");
-  SPIFFS.format();
-
-    //read configuration from FS json
-    Serial.println("mounting FS...");
-
-    if (SPIFFS.begin())
-    {
-        Serial.println("mounted file system");
-        if (SPIFFS.exists("/config.json"))
-        {
-            //file exists, reading and loading
-            Serial.println("reading config file");
-            File configFile = SPIFFS.open("/config.json", "r");
-            if (configFile)
-            {
-                Serial.println("opened config file");
-                size_t size = configFile.size();
-
-                StaticJsonDocument<BUFFER_SIZE> json;
-                // Deserialize the JSON document
-                DeserializationError error = deserializeJson(json, configFile);
-                if (error)
-                    Serial.println(F("Failed to read file, using default configuration"));
-
-                strcpy(mqtt_server, json["mqtt_server"]);
-                strcpy(mqtt_portStr, json["mqtt_port"]);
-                mqtt_port = atoi(mqtt_portStr);
-                strcpy(mqtt_username, json["mqtt_username"]);
-                strcpy(mqtt_password, json["mqtt_password"]);
-                strcpy(mqtt_topic, json["mqtt_topic"]);
-            }
-        }
-        else
-        {
-            Serial.println("/config.json does not exist, creating");
-            saveConfigJson(); // saving the hardcoded default values
-        }
-    }
-    else
-    {
-        Serial.println("failed to mount FS");
-    }
-    //end read
-
-    wm.setSaveConfigCallback(saveConfigCallback);
-
-    wm.resetSettings();
-    wm.setHostname("SecretSantaClock");
-
-    // wm.setAPCallback(configModeCallback);
-    wm.setConfigPortalBlocking(false);
-
-    online = wm.autoConnect("SecretSantaClockAP");
-
-    if (!online)
-    {
-        Serial.println("Failed to connect");
-        // ESP.restart();
-    }
-    else
-    {
-        //if you get here you have connected to the WiFi
-        Serial.println("connected...yeey :)");
-
-        timeClient.begin();
-        delay(1000);
-        if (timeClient.update())
-        {
-            Serial.print("Adjust local clock");
-            unsigned long epoch = timeClient.getEpochTime();
-            setTime(epoch);
-        }
-        else
-        {
-            Serial.print("NTP Update does not WORK!!");
-        }
-
-        Serial.print(" now after ntp ? ");
-        Serial.println(now());
-    }
-    // wm.startConfigPortal("SecretSantaClockAP");
-
-    //hardcoded ... should be a button
-    boolean startConfigPortal = true;
-
-    if (startConfigPortal)
-    {
-
-        Serial.println("setting parameters ");
-        
-        WiFiManagerParameter custom_mqtt_server("server", "mqtt server", mqtt_server, 40);
-        WiFiManagerParameter custom_mqtt_port("port", "mqtt port", mqtt_portStr, 6);
-        WiFiManagerParameter custom_mqtt_username("username", "mqtt username", mqtt_username, 32);
-        WiFiManagerParameter custom_mqtt_password("password", "mqtt password", mqtt_password, 32);
-        WiFiManagerParameter custom_mqtt_topic("topic", "mqtt topic", mqtt_topic, 32);
-
-        wm.addParameter(&custom_mqtt_server);
-        wm.addParameter(&custom_mqtt_port);
-        wm.addParameter(&custom_mqtt_username);
-        wm.addParameter(&custom_mqtt_password);
-        wm.addParameter(&custom_mqtt_topic);
-
-        // If the user requests it, start the wifimanager
-        wm.startConfigPortal("SecretSantaClockAP");
-
-        if (shouldSaveConfig)
-        {
-            // read the updated parameters
-            strcpy(mqtt_server, custom_mqtt_server.getValue());
-            strcpy(mqtt_portStr, custom_mqtt_port.getValue());
-            mqtt_port = atoi(mqtt_portStr);
-            strcpy(mqtt_username, custom_mqtt_username.getValue());
-            strcpy(mqtt_password, custom_mqtt_password.getValue());
-            strcpy(mqtt_topic, custom_mqtt_topic.getValue());
-
-            saveConfigJson();
-            shouldSaveConfig = false;
-        }
-    }
-
-    mqttClient.setServer(mqtt_server, mqtt_port);
-}
-
-void loop()
-{
-    // because we are not blocking ...
-    wm.process();
-
-    // if (online)
-    // {
-    //     // make sure the MQTT client is connected
-    //     if (!mqttClient.connected())
-    //     {
-    //         reconnectMqtt();
-    //     }
-    //     mqttClient.loop(); // Need to call this, otherwise mqtt breaks
-    // }
-
-    // leds[i] = CRGB::Red;
-    // Serial.println(i);
-    // i++;
-
-    // if (i > NUM_LEDS)
-    // {
-    //     FastLED.clear();
-    //     i = 0;
-    // }
-
-    // if(i > 9){
-    //     i = 0;
-    // }
-
-    // char c = '0' + i;
-
-    // i++;
-
     time_t utc = now();
-    // Serial.print("utc ");
-    // Serial.println(utc);
     time_t t = CE.toLocal(utc, &tcr);
-    // Serial.print("local ");
-    // Serial.println(t);
 
     int hours = hour(t);
     int mins = minute(t);
@@ -414,34 +485,272 @@ void loop()
     char s1 = '0' + secs / 10;
     char s2 = '0' + secs - ((secs / 10) * 10);
 
-    CRGB crgb = CRGB::Red;
+    CRGB crgb = c1;
     drawdigit(DIGIT1, crgb, h1);
     drawdigit(DIGIT2, crgb, h2);
     drawdigit(DIGIT3, crgb, m1);
     drawdigit(DIGIT4, crgb, m2);
 
-    //crgb = CRGB::Green;
     crgb = CHSV(hue++, 255, 255);
     setNumberOfLeds(LOGO, DIGIT1, crgb);
     setNumberOfLeds(DOT1, 1, crgb);
     setNumberOfLeds(DOT2, 1, crgb);
 
     FastLED.setBrightness(150);
+}
+
+void showTemp()
+{
+    int c = (celsius + temp_offset_float) * 10;
+
+    char buffer[7];
+    itoa(c, buffer, 10);
+
+    char d1 = 0 + buffer[0];
+    char d2 = 0 + buffer[1];
+    char d3 = 0 + buffer[2];
+    char d4 = char(176);
+
+    CRGB crgb = c2;
+    drawdigit(DIGIT1, crgb, d1);
+    drawdigit(DIGIT2, crgb, d2);
+    drawdigit(DIGIT3, crgb, d3);
+    drawdigit(DIGIT4, crgb, d4);
+
+    crgb = CHSV(hue++, 255, 255);
+    setNumberOfLeds(LOGO, DIGIT1, crgb);
+    setNumberOfLeds(DOT2, 1, crgb);
+    setNumberOfLeds(DOT1, 1, CRGB::Black);
+}
+
+CRGB getCRGBFromString(char *rgbStr)
+{
+    int rgb[3];
+    int i = 0;
+    char *p = rgbStr;
+    char *str;
+    while ((str = strtok_r(p, ",", &p)) != NULL)
+    {
+        rgb[i] = atoi(str);
+        // Serial.print(i);
+        // Serial.print(F(":"));
+        // Serial.println((int) rgb[i]);
+
+        i++;
+    }
+
+    // int r = rgb[0];
+    // int g = rgb[1];
+    // int b = rgb[2];
+    // Serial.print("about to create crgb ");
+    // Serial.print(r);
+    // Serial.print(",");
+    // Serial.print(g);
+    // Serial.print(",");
+    // Serial.println(b);
+    CRGB output = CRGB(rgb[0], rgb[1], rgb[2]);
+    // Serial.print("infunc avg ");
+    // Serial.println(output.getAverageLight());
+    return output;
+}
+
+void setBaseColors()
+{
+    c1 = getCRGBFromString(color1);
+    c2 = getCRGBFromString(color2);
+}
+
+bool checkBoundSensor(float newValue, float prevValue, float maxDiff)
+{
+    return newValue < prevValue - maxDiff || newValue > prevValue + maxDiff;
+}
+
+void setup()
+{
+    Serial.begin(9600);
+    Serial.println();
+
+    pinMode(LDRPIN, INPUT);
+    pinMode(TRIGGER_PIN, INPUT_PULLUP);
+
+    setupSpiffs();
+
+    timeClient.begin();
+    myRTC.begin();
+    setSyncProvider(myRTC.get);
+    if (timeStatus() != timeSet)
+        Serial.println(F("Unable to sync with the RTC"));
+    else
+    {
+        Serial.print(F("RTC has set the system time: "));
+        Serial.println(now());
+    }
+    celsius = myRTC.temperature() / 4.0;
+
+    //callbacks
+    wm.setSaveConfigCallback(saveConfigCallback);
+    wm.setSaveParamsCallback(saveParamsCallback);
+
+    //params
+    wm.addParameter(&custom_mqtt_server);
+    wm.addParameter(&custom_mqtt_port);
+    wm.addParameter(&custom_mqtt_username);
+    wm.addParameter(&custom_mqtt_password);
+    wm.addParameter(&custom_mqtt_topic_state);
+    wm.addParameter(&custom_ntp_server);
+    wm.addParameter(&custom_temp_offset);
+    wm.addParameter(&custom_color1);
+    wm.addParameter(&custom_color2);
+
+    new (&custom_field) WiFiManagerParameter("customfieldid", "Custom Field Label", "Custom Field Value", customFieldLength, "placeholder=\"Custom Field Placeholder\" type=\"checkbox\""); // custom html type
+    wm.addParameter(&custom_field);
+
+    //reset settings - wipe credentials for testing
+    // wm.resetSettings();
+    // ESP.reset();
+
+    wm.setConfigPortalBlocking(false);
+    wm.setHostname(HOSTNAME);
+
+    online = wm.autoConnect(APNAME);
+
+    if (!online)
+    {
+        Serial.println(F("Failed to connect"));
+        // ESP.restart();
+    }
+    else
+    {
+        Serial.println(F("connected...yeey :)"));
+        updateTimeFromNTP();
+    }
+
+    //every 5 minutes = 300
+    mqttTicker.attach(300, postMqttStatus);
+    ntpTicker.attach(600, updateTimeFromNTP);
+
+    FastLED.addLeds<LED_TYPE, DATA_PIN, COLOR_ORDER>(leds, NUM_LEDS).setCorrection(TypicalLEDStrip);
+    Serial.println(F("FastLED setup"));
+    FastLED.setBrightness(50);
+    FastLED.clear();
     FastLED.show();
 
-    // char buf[40];
-    // time_t t = myRTC.get();
-    // float celsius = myRTC.temperature() / 4.0;
-    // float fahrenheit = celsius * 9.0 / 5.0 + 32.0;
-    // sprintf(buf, "%.2d:%.2d:%.2d %.2d%s%d ",
-    //         hour(t), minute(t), second(t), day(t), monthShortStr(month(t)), year(t));
-    // Serial.print(buf);
-    // Serial.print(celsius);
-    // Serial.print("C ");
-    // Serial.print(fahrenheit);
-    // Serial.println("F");
-    // Serial.print("hours ");
-    // Serial.println(hour(t));
+    setBaseColors();
+}
 
-    delay(100);
+void loop()
+{
+    wm.process();
+
+    if (online)
+    {
+        // make sure the MQTT client is connected
+        if (!mqttClient.connected())
+        {
+            // Serial.println(F("reconnecting"));
+            reconnectMqtt();
+        }
+        mqttClient.loop(); // Need to call this, otherwise mqtt breaks
+    }
+
+    if (mode == MODE_CLOCK)
+    {
+        showTime();
+    }
+    else if (mode == MODE_TEMP)
+    {
+        celsius = myRTC.temperature() / 4.0;
+        showTemp();
+    }
+    else if (mode == MODE_CLOCKTEMP)
+    {
+        if (now() > tempCounterMin)
+        {
+            celsius = myRTC.temperature() / 4.0;
+            tempCounterMin = now() + 60;
+            tempCounterShow = now() + 5;
+            Serial.println(F("Resetting timer for temp"));
+            Serial.print(F("tempCounterMin: "));
+            Serial.println(tempCounterMin);
+            Serial.print(F("tempCounterShow: "));
+            Serial.println(tempCounterShow);
+        }
+        if (now() < tempCounterShow)
+        {
+            showTemp();
+        }
+        else
+        {
+            showTime();
+        }
+    }
+    else
+    {
+        // implies MODE_OFF
+        FastLED.clear();
+    }
+
+    if (now() % 100 == 0)
+    {
+        if (now() % 60 == 0)
+        {
+            Serial.println(F("."));
+        }
+        else
+        {
+            Serial.print(F("."));
+        }
+    }
+
+    int newLDR = analogRead(LDRPIN);
+    if (checkBoundSensor(newLDR, LDR, diffLDR))
+    {
+        LDR = newLDR;
+        //      sendState();
+    }
+    // Serial.print(F("Lightsensor ; "));
+    // Serial.println(LDR);
+    bright = (1 - ((LDR - 100.) / 1024.)) * 150. - 15.;
+    // Serial.print(F("proposed brightness "));
+    // Serial.println(bright);
+    FastLED.setBrightness(bright);
+
+    button = digitalRead(TRIGGER_PIN);
+    // Serial.print(F("Button: "));
+    // Serial.println(button);
+
+    if (button == LOW)
+    {
+        if (buttonPressed == false)
+        {
+            buttonPressed = true;
+            // buttonLockUntil = now() + 10;
+            // Serial.println(F("Button pressed"));
+            // wm.setConfigPortalTimeout(timeout);
+            // wm.startConfigPortal(APNAME);
+            fill_solid(leds, NUM_LEDS, CRGB::White);
+            FastLED.show();
+            Serial.println(F("Resetting ... "));
+            wm.resetSettings();
+            Serial.println(F("Reset wm settings ... going to format"));
+            SPIFFS.format();
+            Serial.println(F("Format complet ... resetting ESP ..."));
+            ESP.reset();
+            delay(1000);
+
+            // } else {
+            //     if(now() > buttonLockUntil){
+            //         Serial.println(F("Button press timed out"));
+            //         buttonPressed = false;
+            //     } else {
+            //         Serial.println(F("Button considered pressed"));
+            //         fill_solid(leds, NUM_LEDS, CRGB::White);
+            //     }
+            // }
+        }
+    }
+
+    FastLED.show();
+
+    delay(1000);
 }
