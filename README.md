@@ -1,9 +1,9 @@
 # secretsanta2020 :santa:
 
 This is a project for Rian who was on Santa's good-list.
-Santa got his name through the Secret Santa 2020 campaign of the [MakeInBelgium facebrook group](https://www.facebook.com/groups/makeinbelgium/permalink/3414757655276470).
+Santa got his name through the Secret Santa 2020 campaign of the [MakeInBelgium facebook group](https://www.facebook.com/groups/makeinbelgium/permalink/3414757655276470).
 
-I made him a digital LED segment clock with his name in modular 3D printed enclosures.
+I made him a digital LED segment clock with his name in modular 3D printed enclosures. The digits have a uniform color. But the Rian-logo and the `:` in the middle color cycle slowly.
 
 ![SecretSantaClock](https://lh3.googleusercontent.com/pw/ACtC-3eVZhOMHTfICzi0teHSat15XgUNSiLqqCiNRee5lyfhbFXGZaFYJ4gO0QFXKAGCdoFwdbEP7DYLsP22yx-xGMuc261i1WjAGfB3t8Bz2P4to3SfvMSJvvKibINTjG5FJ4ud8s5aqXQ7LxhhNMFakMyr=w1080-h810-no?authuser=0)
 
