@@ -1,9 +1,15 @@
 # secretsanta2020 :santa:
 
-This is a project for a boy called Rian who is on Santa's good-list.
+This is a project for Rian who was on Santa's good-list.
 Santa got his name through the Secret Santa 2020 campaign of the MakeInBelgium facebrook group. () https://www.facebook.com/groups/makeinbelgium/permalink/3414757655276470 )
 
 This is a digital LED segment clock with a logo in modular 3D printed enclosures.
+
+![SecretSantaClock](https://lh3.googleusercontent.com/pw/ACtC-3eVZhOMHTfICzi0teHSat15XgUNSiLqqCiNRee5lyfhbFXGZaFYJ4gO0QFXKAGCdoFwdbEP7DYLsP22yx-xGMuc261i1WjAGfB3t8Bz2P4to3SfvMSJvvKibINTjG5FJ4ud8s5aqXQ7LxhhNMFakMyr=w1080-h810-no?authuser=0)
+
+![Wireframe](https://lh3.googleusercontent.com/pw/ACtC-3fIov0i_BTv4j1BN9GwLmHVfTGJo_IWrwm7Qs_9xoxIL6i_s5zvjfWdPwjXccUIdcjyego-vnKVyUJALI_zz-KxH6KLB7czvyYNXrcke569lO0McK-JgmqaxKOjp_Wfl9x5aJYRNcLvwjpR3PBZJXpc=w963-h810-no)
+
+[Photo gallery](https://photos.app.goo.gl/esswfGq329zNh7Nb6)
 
 ## Offline features
 
@@ -33,7 +39,7 @@ The field `color 1` is the primary color used for the digits of the clock. The r
 
 Other values are not used for the moment.
 
-On the back there is a small push button
+On the back there is a small push button, push it for 2 seconds with a pen to reset all configurations. The clock will light up white and takes about 10 seconds to reset and clear all configuration.
 
 ## Connected features
 
@@ -61,7 +67,7 @@ I have a beta version of this clock and it shows the indoor and outdoor temperat
 
 I got the initial idea (for my beta clock) from [Ivan Miranda](https://ivanmiranda.com) who posted a video on his youtube channel making a basic version of this clock. So thanks to Ivan for his sharing his work !
 
-<iframe width="560" height="315" src="https://www.youtube.com/embed/PixXKK8N_wA" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+[![Watch the video](https://img.youtube.com/vi/PixXKK8N_wA/hqdefault.jpg)](https://youtu.be/PixXKK8N_wA)
 
 ## Main components
 

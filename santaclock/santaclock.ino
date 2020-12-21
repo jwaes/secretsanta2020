@@ -710,7 +710,7 @@ void loop()
     }
     // Serial.print(F("Lightsensor ; "));
     // Serial.println(LDR);
-    bright = (1 - ((LDR - 100.) / 1024.)) * 150. - 15.;
+    bright = (1 - ((LDR - 100.) / 1024.)) * 150.;
     // Serial.print(F("proposed brightness "));
     // Serial.println(bright);
     FastLED.setBrightness(bright);
